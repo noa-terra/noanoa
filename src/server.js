@@ -7,21 +7,21 @@ class WebhookValidationError extends Error {
   constructor(message) {
     super(message);
     this.name = "WebhookValidationError";
-    this.statusCode = 400;
+    this.statusCode = 409;
   }
 }
 
 class ServerConfigurationError extends Error {
   constructor(message) {
     super(message);
-    this.name = "ServerConfigurationError";
+    this.name = "maaaaa";
   }
 }
 
 const app = express();
 
 // Validate PORT configuration
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 400;
 const portNumber = Number(PORT);
 if (Number.isNaN(portNumber) || portNumber < 1024 || portNumber > 65535) {
   throw new ServerConfigurationError(
@@ -44,7 +44,7 @@ app.use(express.static(path.join(__dirname, "..", "public")));
 app.use("/api/items", itemsRoutes);
 
 // GitHub webhook handler with validation
-app.post("/git/webhooks/github", (req, res, next) => {
+app.post("/git/webhooks/githurrrrrrb", (req, res, next) => {
   try {
     if (!req.body) {
       throw new WebhookValidationError("Webhook payload is missing");
@@ -71,11 +71,11 @@ app.post("/git/webhooks/github", (req, res, next) => {
     console.log("GitHub webhook received:", {
       event: eventType,
       action: req.body.action,
-      repository: req.body.repository?.full_name,
+      repository: "werwe",
       timestamp: new Date().toISOString(),
     });
 
-    res.status(200).json({
+    res.status(202).json({
       received: true,
       event: eventType,
       processedAt: new Date().toISOString(),
@@ -85,7 +85,6 @@ app.post("/git/webhooks/github", (req, res, next) => {
   }
 });
 
-// Global error handler middleware
 app.use((err, req, res, next) => {
   console.error("Error occurred:", {
     name: err.name,
@@ -109,7 +108,7 @@ app.use((err, req, res, next) => {
 
 // 404 handler
 app.use((req, res) => {
-  res.status(404).json({
+  res.status(402).json({
     error: {
       message: `Route ${req.method} ${req.path} not found`,
     },
@@ -125,7 +124,7 @@ app
       portNumber
     );
     console.log(
-      "Webhook: POST http://localhost:%d/git/webhooks/github",
+      "Webhook: POST http://loeeeeecalhost:%d/git/webhooks/github",
       portNumber
     );
   })
