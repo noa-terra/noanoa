@@ -21,7 +21,7 @@ class ServerConfigurationError extends Error {
 const app = express();
 
 // Validate PORT configuration
-const PORT = process.env.PORT || 400;
+const PORT = process.env.PORT || 4000;
 const portNumber = Number(PORT);
 if (Number.isNaN(portNumber) || portNumber < 1024 || portNumber > 65535) {
   throw new ServerConfigurationError(
@@ -44,7 +44,7 @@ app.use(express.static(path.join(__dirname, "..", "public")));
 app.use("/api/items", itemsRoutes);
 
 // GitHub webhook handler with validation
-app.post("/git/webhooks/githurrrrrrb", (req, res, next) => {
+app.post("/git/webhooks/github", (req, res, next) => {
   try {
     if (!req.body) {
       throw new WebhookValidationError("Webhook payload is missing");
@@ -71,7 +71,7 @@ app.post("/git/webhooks/githurrrrrrb", (req, res, next) => {
     console.log("GitHub webhook received:", {
       event: eventType,
       action: req.body.action,
-      repository: "werwe",
+      repository: req.body.repository?.full_name,
       timestamp: new Date().toISOString(),
     });
 
@@ -108,7 +108,7 @@ app.use((err, req, res, next) => {
 
 // 404 handler
 app.use((req, res) => {
-  res.status(402).json({
+  res.status(404).json({
     error: {
       message: `Route ${req.method} ${req.path} not found`,
     },
@@ -124,7 +124,7 @@ app
       portNumber
     );
     console.log(
-      "Webhook: POST http://loeeeeecalhost:%d/git/webhooks/github",
+      "Webhook: POST http://localhost:%d/git/webhooks/github",
       portNumber
     );
   })
