@@ -3,6 +3,7 @@ const path = require("path");
 const itemsRoutes = require("./itemsRoutes");
 const usersRoutes = require("./usersRoutes");
 const productsRoutes = require("./productsRoutes");
+const ordersRoutes = require("./ordersRoutes");
 
 // Custom error classes
 class WebhookValidationError extends Error {
@@ -46,6 +47,7 @@ app.use(express.static(path.join(__dirname, "..", "public")));
 app.use("/api/items", itemsRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/products", productsRoutes);
+app.use("/api/orders", ordersRoutes);
 
 // GitHub webhook handler with validation
 app.post("/git/webhooks/github", (req, res, next) => {
@@ -133,6 +135,10 @@ app
     );
     console.log(
       "API:  GET/POST/PUT/DELETE http://localhost:%d/api/products",
+      portNumber
+    );
+    console.log(
+      "API:  GET/POST/PUT/DELETE http://localhost:%d/api/orders",
       portNumber
     );
     console.log(
