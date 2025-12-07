@@ -2,10 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Mini App - Items & Products</title>
+    <title>Mini App - Items, Products & Orders</title>
     <style>
       :root {
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
       }
       body {
         margin: 0;
@@ -68,7 +69,8 @@
         display: flex;
         gap: 0.5rem;
       }
-      input, select {
+      input,
+      select {
         flex: 1;
         padding: 0.4rem 0.6rem;
         border-radius: 0.4rem;
@@ -138,15 +140,60 @@
         color: #2563eb;
         font-weight: 600;
       }
+      .order-info {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+        flex: 1;
+      }
+      .order-customer {
+        font-weight: 500;
+      }
+      .order-details {
+        font-size: 0.8rem;
+        color: #666;
+      }
+      .order-total {
+        color: #059669;
+        font-weight: 600;
+      }
+      .status-badge {
+        display: inline-block;
+        padding: 0.15rem 0.4rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 500;
+      }
+      .status-pending {
+        background: #fef3c7;
+        color: #92400e;
+      }
+      .status-processing {
+        background: #dbeafe;
+        color: #1e40af;
+      }
+      .status-shipped {
+        background: #e0e7ff;
+        color: #3730a3;
+      }
+      .status-completed {
+        background: #d1fae5;
+        color: #065f46;
+      }
+      .status-cancelled {
+        background: #fee2e2;
+        color: #991b1b;
+      }
     </style>
   </head>
   <body>
     <div class="card">
-      <h1>Mini App - Items & Products</h1>
-      
+      <h1>Mini App - Items, Products & Orders</h1>
+
       <div class="tabs">
         <button class="tab active" data-tab="items">Items</button>
         <button class="tab" data-tab="products">Products</button>
+        <button class="tab" data-tab="orders">Orders</button>
       </div>
 
       <!-- Items Tab -->
@@ -188,42 +235,83 @@
             />
           </div>
           <div class="form-row">
-            <input
-              id="product-category"
-              type="text"
-              placeholder="Category"
-            />
+            <input id="product-category" type="text" placeholder="Category" />
             <button type="submit">Add Product</button>
           </div>
         </form>
         <ul id="products-list"></ul>
       </div>
+
+      <!-- Orders Tab -->
+      <div id="orders-tab" class="tab-content">
+        <form id="order-form">
+          <input
+            id="order-customer"
+            type="text"
+            placeholder="Customer name"
+            required
+          />
+          <div class="form-row">
+            <input
+              id="order-product-id"
+              type="number"
+              placeholder="Product ID"
+              required
+            />
+            <input
+              id="order-quantity"
+              type="number"
+              placeholder="Quantity"
+              min="1"
+              value="1"
+              required
+            />
+          </div>
+          <div class="form-row">
+            <input
+              id="order-price"
+              type="number"
+              step="0.01"
+              placeholder="Price per unit"
+              required
+            />
+            <button type="submit">Create Order</button>
+          </div>
+        </form>
+        <ul id="orders-list"></ul>
+      </div>
     </div>
 
     <script>
       // Tab switching
-      document.querySelectorAll('.tab').forEach(tab => {
-        tab.addEventListener('click', () => {
+      document.querySelectorAll(".tab").forEach((tab) => {
+        tab.addEventListener("click", () => {
           const targetTab = tab.dataset.tab;
-          document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-          document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-          tab.classList.add('active');
-          document.getElementById(`${targetTab}-tab`).classList.add('active');
-          
+          document
+            .querySelectorAll(".tab")
+            .forEach((t) => t.classList.remove("active"));
+          document
+            .querySelectorAll(".tab-content")
+            .forEach((t) => t.classList.remove("active"));
+          tab.classList.add("active");
+          document.getElementById(`${targetTab}-tab`).classList.add("active");
+
           // Refresh data when switching tabs
-          if (targetTab === 'items') {
+          if (targetTab === "items") {
             fetchItems();
-          } else if (targetTab === 'products') {
+          } else if (targetTab === "products") {
             fetchProducts();
+          } else if (targetTab === "orders") {
+            fetchOrders();
           }
         });
       });
 
       // Items API
-      const ITEMS_API = '/api/items';
-      const itemsList = document.getElementById('items-list');
-      const itemForm = document.getElementById('item-form');
-      const itemInput = document.getElementById('item-name');
+      const ITEMS_API = "/api/items";
+      const itemsList = document.getElementById("items-list");
+      const itemForm = document.getElementById("item-form");
+      const itemInput = document.getElementById("item-name");
 
       async function fetchItems() {
         try {
@@ -231,29 +319,29 @@
           const items = await res.json();
           renderItems(items);
         } catch (error) {
-          console.error('Error fetching items:', error);
+          console.error("Error fetching items:", error);
         }
       }
 
       function renderItems(items) {
-        itemsList.innerHTML = '';
+        itemsList.innerHTML = "";
         if (!items.length) {
-          const li = document.createElement('li');
-          li.className = 'empty';
-          li.textContent = 'No items yet. Add one!';
+          const li = document.createElement("li");
+          li.className = "empty";
+          li.textContent = "No items yet. Add one!";
           itemsList.appendChild(li);
           return;
         }
 
         for (const item of items) {
-          const li = document.createElement('li');
+          const li = document.createElement("li");
           li.textContent = item.name;
 
-          const btn = document.createElement('button');
-          btn.textContent = 'Delete';
-          btn.className = 'delete-btn';
+          const btn = document.createElement("button");
+          btn.textContent = "Delete";
+          btn.className = "delete-btn";
           btn.onclick = async () => {
-            await fetch(`${ITEMS_API}/${item.id}`, { method: 'DELETE' });
+            await fetch(`${ITEMS_API}/${item.id}`, { method: "DELETE" });
             fetchItems();
           };
 
@@ -262,31 +350,31 @@
         }
       }
 
-      itemForm.addEventListener('submit', async (e) => {
+      itemForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         const name = itemInput.value.trim();
         if (!name) return;
         try {
           await fetch(ITEMS_API, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name }),
           });
-          itemInput.value = '';
+          itemInput.value = "";
           fetchItems();
         } catch (error) {
-          console.error('Error adding item:', error);
+          console.error("Error adding item:", error);
         }
       });
 
       // Products API
-      const PRODUCTS_API = '/api/products';
-      const productsList = document.getElementById('products-list');
-      const productForm = document.getElementById('product-form');
-      const productName = document.getElementById('product-name');
-      const productPrice = document.getElementById('product-price');
-      const productStock = document.getElementById('product-stock');
-      const productCategory = document.getElementById('product-category');
+      const PRODUCTS_API = "/api/products";
+      const productsList = document.getElementById("products-list");
+      const productForm = document.getElementById("product-form");
+      const productName = document.getElementById("product-name");
+      const productPrice = document.getElementById("product-price");
+      const productStock = document.getElementById("product-stock");
+      const productCategory = document.getElementById("product-category");
 
       async function fetchProducts() {
         try {
@@ -294,51 +382,53 @@
           const products = await res.json();
           renderProducts(products);
         } catch (error) {
-          console.error('Error fetching products:', error);
+          console.error("Error fetching products:", error);
         }
       }
 
       function renderProducts(products) {
-        productsList.innerHTML = '';
+        productsList.innerHTML = "";
         if (!products.length) {
-          const li = document.createElement('li');
-          li.className = 'empty';
-          li.textContent = 'No products yet. Add one!';
+          const li = document.createElement("li");
+          li.className = "empty";
+          li.textContent = "No products yet. Add one!";
           productsList.appendChild(li);
           return;
         }
 
         for (const product of products) {
-          const li = document.createElement('li');
-          
-          const info = document.createElement('div');
-          info.className = 'product-info';
-          
-          const name = document.createElement('div');
-          name.className = 'product-name';
+          const li = document.createElement("li");
+
+          const info = document.createElement("div");
+          info.className = "product-info";
+
+          const name = document.createElement("div");
+          name.className = "product-name";
           name.textContent = product.name;
-          
-          const details = document.createElement('div');
-          details.className = 'product-details';
+
+          const details = document.createElement("div");
+          details.className = "product-details";
           details.innerHTML = `
             <span class="product-price">$${product.price.toFixed(2)}</span> • 
             Stock: ${product.stock} • 
-            ${product.category || 'Uncategorized'}
+            ${product.category || "Uncategorized"}
           `;
-          
+
           info.appendChild(name);
           info.appendChild(details);
           li.appendChild(info);
 
-          const btn = document.createElement('button');
-          btn.textContent = 'Delete';
-          btn.className = 'delete-btn';
+          const btn = document.createElement("button");
+          btn.textContent = "Delete";
+          btn.className = "delete-btn";
           btn.onclick = async () => {
             try {
-              await fetch(`${PRODUCTS_API}/${product.id}`, { method: 'DELETE' });
+              await fetch(`${PRODUCTS_API}/${product.id}`, {
+                method: "DELETE",
+              });
               fetchProducts();
             } catch (error) {
-              console.error('Error deleting product:', error);
+              console.error("Error deleting product:", error);
             }
           };
 
@@ -347,31 +437,143 @@
         }
       }
 
-      productForm.addEventListener('submit', async (e) => {
+      productForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         const name = productName.value.trim();
         const price = parseFloat(productPrice.value);
         const stock = parseInt(productStock.value) || 0;
         const category = productCategory.value.trim() || undefined;
-        
+
         if (!name || isNaN(price) || price < 0) {
-          alert('Please enter a valid name and price');
+          alert("Please enter a valid name and price");
           return;
         }
-        
+
         try {
           await fetch(PRODUCTS_API, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name, price, stock, category }),
           });
-          productName.value = '';
-          productPrice.value = '';
-          productStock.value = '0';
-          productCategory.value = '';
+          productName.value = "";
+          productPrice.value = "";
+          productStock.value = "0";
+          productCategory.value = "";
           fetchProducts();
         } catch (error) {
-          console.error('Error adding product:', error);
+          console.error("Error adding product:", error);
+        }
+      });
+
+      // Orders API
+      const ORDERS_API = "/api/orders";
+      const ordersList = document.getElementById("orders-list");
+      const orderForm = document.getElementById("order-form");
+      const orderCustomer = document.getElementById("order-customer");
+      const orderProductId = document.getElementById("order-product-id");
+      const orderQuantity = document.getElementById("order-quantity");
+      const orderPrice = document.getElementById("order-price");
+
+      async function fetchOrders() {
+        try {
+          const res = await fetch(ORDERS_API);
+          const orders = await res.json();
+          renderOrders(orders);
+        } catch (error) {
+          console.error("Error fetching orders:", error);
+        }
+      }
+
+      function renderOrders(orders) {
+        ordersList.innerHTML = "";
+        if (!orders.length) {
+          const li = document.createElement("li");
+          li.className = "empty";
+          li.textContent = "No orders yet. Create one!";
+          ordersList.appendChild(li);
+          return;
+        }
+
+        for (const order of orders) {
+          const li = document.createElement("li");
+
+          const info = document.createElement("div");
+          info.className = "order-info";
+
+          const customer = document.createElement("div");
+          customer.className = "order-customer";
+          customer.textContent = order.customerName;
+
+          const details = document.createElement("div");
+          details.className = "order-details";
+          const statusClass = `status-${order.status}`;
+          details.innerHTML = `
+            <span class="order-total">$${order.total.toFixed(2)}</span> • 
+            Product ID: ${order.productId} • 
+            Qty: ${order.quantity} • 
+            <span class="status-badge ${statusClass}">${order.status}</span>
+          `;
+
+          info.appendChild(customer);
+          info.appendChild(details);
+          li.appendChild(info);
+
+          const btn = document.createElement("button");
+          btn.textContent = "Delete";
+          btn.className = "delete-btn";
+          btn.onclick = async () => {
+            try {
+              await fetch(`${ORDERS_API}/${order.id}`, {
+                method: "DELETE",
+              });
+              fetchOrders();
+            } catch (error) {
+              console.error("Error deleting order:", error);
+            }
+          };
+
+          li.appendChild(btn);
+          ordersList.appendChild(li);
+        }
+      }
+
+      orderForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const customerName = orderCustomer.value.trim();
+        const productId = parseInt(orderProductId.value);
+        const quantity = parseInt(orderQuantity.value);
+        const price = parseFloat(orderPrice.value);
+
+        if (
+          !customerName ||
+          isNaN(productId) ||
+          isNaN(quantity) ||
+          quantity < 1 ||
+          isNaN(price) ||
+          price < 0
+        ) {
+          alert("Please enter valid order details");
+          return;
+        }
+
+        try {
+          await fetch(ORDERS_API, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              customerName,
+              productId,
+              quantity,
+              price,
+            }),
+          });
+          orderCustomer.value = "";
+          orderProductId.value = "";
+          orderQuantity.value = "1";
+          orderPrice.value = "";
+          fetchOrders();
+        } catch (error) {
+          console.error("Error creating order:", error);
         }
       });
 
