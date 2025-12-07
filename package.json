@@ -1,0 +1,13 @@
+{
+  "name": "mini-app",
+  "version": "1.0.0",
+  "description": "Minimal full-stack app with UI and REST API on port 4000",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "NODE_ENV=development node src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}
