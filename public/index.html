@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Mini Items App</title>
+    <title>Mini App - Items & Products</title>
     <style>
       :root {
         font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -14,24 +14,61 @@
         align-items: center;
         justify-content: center;
         background: #f5f5f7;
+        padding: 1rem;
       }
       .card {
         background: white;
         padding: 1.5rem;
         border-radius: 0.75rem;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
-        width: 360px;
+        width: 100%;
+        max-width: 600px;
       }
       h1 {
         margin: 0 0 1rem;
         font-size: 1.3rem;
       }
-      form {
+      .tabs {
         display: flex;
         gap: 0.5rem;
         margin-bottom: 1rem;
+        border-bottom: 2px solid #f0f0f3;
       }
-      input {
+      .tab {
+        padding: 0.5rem 1rem;
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 0.9rem;
+        color: #666;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+      }
+      .tab.active {
+        color: #2563eb;
+        border-bottom-color: #2563eb;
+        font-weight: 500;
+      }
+      .tab:hover {
+        color: #2563eb;
+      }
+      .tab-content {
+        display: none;
+      }
+      .tab-content.active {
+        display: block;
+      }
+      form {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+      }
+      .form-row {
+        display: flex;
+        gap: 0.5rem;
+      }
+      input, select {
         flex: 1;
         padding: 0.4rem 0.6rem;
         border-radius: 0.4rem;
@@ -59,7 +96,7 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 0.3rem 0;
+        padding: 0.5rem 0;
         border-bottom: 1px solid #f0f0f3;
         font-size: 0.9rem;
       }
@@ -69,6 +106,8 @@
       .empty {
         font-size: 0.85rem;
         color: #888;
+        padding: 1rem 0;
+        text-align: center;
       }
       .delete-btn {
         padding: 0.2rem 0.4rem;
@@ -82,42 +121,127 @@
       .delete-btn:hover {
         background: #fecaca;
       }
+      .product-info {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+        flex: 1;
+      }
+      .product-name {
+        font-weight: 500;
+      }
+      .product-details {
+        font-size: 0.8rem;
+        color: #666;
+      }
+      .product-price {
+        color: #2563eb;
+        font-weight: 600;
+      }
     </style>
   </head>
   <body>
     <div class="card">
-      <h1>Mini Items App</h1>
-      <form id="item-form">
-        <input
-          id="item-name"
-          type="text"
-          placeholder="New item name"
-          required
-        />
-        <button type="submit">Add</button>
-      </form>
-      <ul id="items-list"></ul>
+      <h1>Mini App - Items & Products</h1>
+      
+      <div class="tabs">
+        <button class="tab active" data-tab="items">Items</button>
+        <button class="tab" data-tab="products">Products</button>
+      </div>
+
+      <!-- Items Tab -->
+      <div id="items-tab" class="tab-content active">
+        <form id="item-form">
+          <input
+            id="item-name"
+            type="text"
+            placeholder="New item name"
+            required
+          />
+          <button type="submit">Add Item</button>
+        </form>
+        <ul id="items-list"></ul>
+      </div>
+
+      <!-- Products Tab -->
+      <div id="products-tab" class="tab-content">
+        <form id="product-form">
+          <input
+            id="product-name"
+            type="text"
+            placeholder="Product name"
+            required
+          />
+          <div class="form-row">
+            <input
+              id="product-price"
+              type="number"
+              step="0.01"
+              placeholder="Price"
+              required
+            />
+            <input
+              id="product-stock"
+              type="number"
+              placeholder="Stock"
+              value="0"
+            />
+          </div>
+          <div class="form-row">
+            <input
+              id="product-category"
+              type="text"
+              placeholder="Category"
+            />
+            <button type="submit">Add Product</button>
+          </div>
+        </form>
+        <ul id="products-list"></ul>
+      </div>
     </div>
 
     <script>
-      const API_BASE = '/api/items';
-      const list = document.getElementById('items-list');
-      const form = document.getElementById('item-form');
-      const input = document.getElementById('item-name');
+      // Tab switching
+      document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          const targetTab = tab.dataset.tab;
+          document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+          document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+          tab.classList.add('active');
+          document.getElementById(`${targetTab}-tab`).classList.add('active');
+          
+          // Refresh data when switching tabs
+          if (targetTab === 'items') {
+            fetchItems();
+          } else if (targetTab === 'products') {
+            fetchProducts();
+          }
+        });
+      });
+
+      // Items API
+      const ITEMS_API = '/api/items';
+      const itemsList = document.getElementById('items-list');
+      const itemForm = document.getElementById('item-form');
+      const itemInput = document.getElementById('item-name');
 
       async function fetchItems() {
-        const res = await fetch(API_BASE);
-        const items = await res.json();
-        render(items);
+        try {
+          const res = await fetch(ITEMS_API);
+          const items = await res.json();
+          renderItems(items);
+        } catch (error) {
+          console.error('Error fetching items:', error);
+        }
       }
 
-      function render(items) {
-        list.innerHTML = '';
+      function renderItems(items) {
+        itemsList.innerHTML = '';
         if (!items.length) {
           const li = document.createElement('li');
           li.className = 'empty';
           li.textContent = 'No items yet. Add one!';
-          list.appendChild(li);
+          itemsList.appendChild(li);
           return;
         }
 
@@ -129,28 +253,129 @@
           btn.textContent = 'Delete';
           btn.className = 'delete-btn';
           btn.onclick = async () => {
-            await fetch(`${API_BASE}/${item.id}`, { method: 'DELETE' });
+            await fetch(`${ITEMS_API}/${item.id}`, { method: 'DELETE' });
             fetchItems();
           };
 
           li.appendChild(btn);
-          list.appendChild(li);
+          itemsList.appendChild(li);
         }
       }
 
-      form.addEventListener('submit', async (e) => {
+      itemForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const name = input.value.trim();
+        const name = itemInput.value.trim();
         if (!name) return;
-        await fetch(API_BASE, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name }),
-        });
-        input.value = '';
-        fetchItems();
+        try {
+          await fetch(ITEMS_API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name }),
+          });
+          itemInput.value = '';
+          fetchItems();
+        } catch (error) {
+          console.error('Error adding item:', error);
+        }
       });
 
+      // Products API
+      const PRODUCTS_API = '/api/products';
+      const productsList = document.getElementById('products-list');
+      const productForm = document.getElementById('product-form');
+      const productName = document.getElementById('product-name');
+      const productPrice = document.getElementById('product-price');
+      const productStock = document.getElementById('product-stock');
+      const productCategory = document.getElementById('product-category');
+
+      async function fetchProducts() {
+        try {
+          const res = await fetch(PRODUCTS_API);
+          const products = await res.json();
+          renderProducts(products);
+        } catch (error) {
+          console.error('Error fetching products:', error);
+        }
+      }
+
+      function renderProducts(products) {
+        productsList.innerHTML = '';
+        if (!products.length) {
+          const li = document.createElement('li');
+          li.className = 'empty';
+          li.textContent = 'No products yet. Add one!';
+          productsList.appendChild(li);
+          return;
+        }
+
+        for (const product of products) {
+          const li = document.createElement('li');
+          
+          const info = document.createElement('div');
+          info.className = 'product-info';
+          
+          const name = document.createElement('div');
+          name.className = 'product-name';
+          name.textContent = product.name;
+          
+          const details = document.createElement('div');
+          details.className = 'product-details';
+          details.innerHTML = `
+            <span class="product-price">$${product.price.toFixed(2)}</span> • 
+            Stock: ${product.stock} • 
+            ${product.category || 'Uncategorized'}
+          `;
+          
+          info.appendChild(name);
+          info.appendChild(details);
+          li.appendChild(info);
+
+          const btn = document.createElement('button');
+          btn.textContent = 'Delete';
+          btn.className = 'delete-btn';
+          btn.onclick = async () => {
+            try {
+              await fetch(`${PRODUCTS_API}/${product.id}`, { method: 'DELETE' });
+              fetchProducts();
+            } catch (error) {
+              console.error('Error deleting product:', error);
+            }
+          };
+
+          li.appendChild(btn);
+          productsList.appendChild(li);
+        }
+      }
+
+      productForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = productName.value.trim();
+        const price = parseFloat(productPrice.value);
+        const stock = parseInt(productStock.value) || 0;
+        const category = productCategory.value.trim() || undefined;
+        
+        if (!name || isNaN(price) || price < 0) {
+          alert('Please enter a valid name and price');
+          return;
+        }
+        
+        try {
+          await fetch(PRODUCTS_API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, price, stock, category }),
+          });
+          productName.value = '';
+          productPrice.value = '';
+          productStock.value = '0';
+          productCategory.value = '';
+          fetchProducts();
+        } catch (error) {
+          console.error('Error adding product:', error);
+        }
+      });
+
+      // Initial load
       fetchItems();
     </script>
   </body>
