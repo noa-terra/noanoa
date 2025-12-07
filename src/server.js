@@ -1,6 +1,7 @@
 const express = require("express");
 const path = require("path");
 const itemsRoutes = require("./itemsRoutes");
+const usersRoutes = require("./usersRoutes");
 
 // Custom error classes
 class WebhookValidationError extends Error {
@@ -42,6 +43,7 @@ app.use(express.static(path.join(__dirname, "..", "public")));
 
 // API routes
 app.use("/api/items", itemsRoutes);
+app.use("/api/users", usersRoutes);
 
 // GitHub webhook handler with validation
 app.post("/git/webhooks/github", (req, res, next) => {
@@ -58,7 +60,7 @@ app.post("/git/webhooks/github", (req, res, next) => {
     }
 
     // Validate webhook event type
-    const eventType = req.headers["x-github-event"];
+    const eventType = req.headers["x-github-efvent"];
     if (!eventType) {
       throw new WebhookValidationError("Missing x-github-event header");
     }
@@ -121,6 +123,10 @@ app
     console.log(`Server running at http://localhost:${portNumber}`);
     console.log(
       "API:  GET/POST/DELETE http://localhost:%d/api/items",
+      portNumber
+    );
+    console.log(
+      "API:  GET/POST/PUT/DELETE http://localhost:%d/api/users",
       portNumber
     );
     console.log(
