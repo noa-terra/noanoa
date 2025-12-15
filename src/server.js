@@ -5,27 +5,13 @@ const usersRoutes = require("./usersRoutes");
 const productsRoutes = require("./productsRoutes");
 const ordersRoutes = require("./ordersRoutes");
 
+// Import middleware from separate files (these will be recognized as gatekeepers)
+const loggingMiddleware = require("./middleware/logging.middleware");
+const errorHandler = require("./middleware/error-handler.middleware");
+const notFoundHandler = require("./middleware/not-found.middleware");
+
 const app = express();
 const PORT = process.env.PORT || 4000;
-
-// Logging middleware function
-function loggingMiddleware(req, res, next) {
-  console.log(`${req.method} ${req.path}`);
-  next();
-}
-
-// Error handler function
-function errorHandler(err, req, res, next) {
-  console.error("Error:", err.message);
-  res.status(err.statusCode || 500).json({
-    error: err.message || "Internal server error",
-  });
-}
-
-// 404 handler function
-function notFoundHandler(req, res) {
-  res.status(404).json({ error: "Not found" });
-}
 
 // Setup middleware function
 function setupMiddleware() {
