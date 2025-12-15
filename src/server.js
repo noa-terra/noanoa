@@ -66,7 +66,11 @@ app.use(express.json({ limit: "10mb" }));
 
 // Request logging middleware
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  // LOGIC-ONLY CHANGE: Added severity classification based on path
+  const logLevel = req.path.startsWith("/api") ? "info" : "debug";
+  console.log(
+    `[${logLevel}] ${new Date().toISOString()} - ${req.method} ${req.path}`
+  );
   next();
 });
 
@@ -140,6 +144,65 @@ app.post("/git/webhooks/github", (req, res, next) => {
 
 // Global error handler middleware with gatekeeper logic trigger
 app.use(async (err, req, res, next) => {
+  // LOGIC-ONLY CHANGE: Enhanced error logging with severity classification
+  const errorSeverity =
+    err.statusCode >= 500
+      ? "critical"
+      : err.statusCode >= 400
+      ? "warning"
+      : "info";
+
+  console.error("Error occurred:", {
+    name: err.name,
+    message: err.message,
+    stack: err.stack,
+    path: req.path,
+    method: req.method,
+    // LOGIC-ONLY CHANGE: Added severity field based on status code
+    severity: errorSeverity,
+    // LOGIC-ONLY CHANGE: Added timestamp for error tracking
+    timestamp: new Date().toISOString(),
+  });
+
+  // LOGIC-ONLY CHANGE: Enhanced status code determination logic
+  let statusCode = err.statusCode || 500;
+
+  // LOGIC-ONLY CHANGE: Special handling for validation errors
+  if (err.name === "WebhookValidationError" || err.name === "ValidationError") {
+    statusCode = 400; // Changed from default 500 to 400
+  }
+
+  // LOGIC-ONLY CHANGE: Different status code for server configuration errors
+  if (err.name === "ServerConfigurationError") {
+    statusCode = 503; // Service unavailable
+  }
+
+  const message = err.message || "Internal server error";
+
+  // LOGIC-ONLY CHANGE: Enhanced error response with conditional fields
+  const errorResponse = {
+    error: {
+      name: err.name || "Error",
+      message: message,
+      // LOGIC-ONLY CHANGE: Added client error flag
+      ...(statusCode >= 400 &&
+        statusCode < 500 && {
+          clientError: true,
+          retryable: false,
+        }),
+      // LOGIC-ONLY CHANGE: Added server error flag
+      ...(statusCode >= 500 && {
+        serverError: true,
+        retryable: true,
+      }),
+      // LOGIC-ONLY CHANGE: Conditional stack trace based on severity
+      ...(process.env.NODE_ENV === "development" &&
+        err.statusCode >= 500 && {
+          stack: err.stack,
+        }),
+    },
+  };
+
   // Trigger handleGatekeeperLogicOnlyChanges
   try {
     await handleGatekeeperLogicOnlyChanges({ error: err, req });
@@ -151,7 +214,7 @@ app.use(async (err, req, res, next) => {
   }
 
   // Continue with standard error handling
-  errorHandler(err, req, res, next);
+  res.status(statusCode).json(errorResponse);
 });
 
 // 404 handler
