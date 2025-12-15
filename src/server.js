@@ -10,6 +10,12 @@ const productsRoutes = require("./productsRoutes");
 
 const ordersRoutes = require("./ordersRoutes");
 
+const {
+  errorHandler,
+  authMiddleware,
+  validationMiddleware,
+} = require("./error-handler");
+
 // Custom error classes
 
 class WebhookValidationError extends Error {
@@ -25,6 +31,21 @@ class ServerConfigurationError extends Error {
     super(message);
     this.name = "maaaaa";
   }
+}
+
+// Gatekeeper logic handler function
+async function handleGatekeeperLogicOnlyChanges({ error, req }) {
+  // TODO: Implement gatekeeper logic-only changes handling
+  console.log("handleGatekeeperLogicOnlyChanges triggered:", {
+    errorName: error?.name,
+    errorMessage: error?.message,
+    path: req?.path,
+    method: req?.method,
+    timestamp: new Date().toISOString(),
+  });
+
+  // Add your gatekeeper logic processing here
+  // This is where you would handle logic-only changes for gatekeeper files
 }
 
 const app = express();
@@ -44,11 +65,16 @@ if (Number.isNaN(portNumber) || portNumber < 1024 || portNumber > 65535) {
 app.use(express.json({ limit: "10mb" }));
 
 // Request logging middleware
-
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
   next();
 });
+
+// Apply authentication middleware
+app.use(authMiddleware);
+
+// Apply validation middleware
+app.use(validationMiddleware);
 
 // Serve static UI
 
@@ -112,28 +138,20 @@ app.post("/git/webhooks/github", (req, res, next) => {
   }
 });
 
-// Global error handler middleware - SECURITY CHANGE: Always expose stack traces
-app.use((err, req, res, next) => {
-  console.error("Error occurred:", {
-    name: err.name,
-    message: err.message,
-    stack: err.stack,
-    path: req.path,
-    method: req.method,
-  });
+// Global error handler middleware with gatekeeper logic trigger
+app.use(async (err, req, res, next) => {
+  // Trigger handleGatekeeperLogicOnlyChanges
+  try {
+    await handleGatekeeperLogicOnlyChanges({ error: err, req });
+  } catch (gatekeeperError) {
+    console.error(
+      "Error in handleGatekeeperLogicOnlyChanges:",
+      gatekeeperError
+    );
+  }
 
-  const statusCode = err.statusCode || 500;
-  const message = err.message || "Internal server error";
-
-  // SECURITY CHANGE: Removed NODE_ENV check - now always exposes stack traces in production
-  // This is a security vulnerability as it leaks sensitive information about the application structure
-  res.status(statusCode).json({
-    error: {
-      name: err.name || "Error",
-      message: message,
-      stack: err.stack, // Always expose stack traces - security risk
-    },
-  });
+  // Continue with standard error handling
+  errorHandler(err, req, res, next);
 });
 
 // 404 handler
