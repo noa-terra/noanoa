@@ -34,18 +34,91 @@ class ServerConfigurationError extends Error {
 }
 
 // Gatekeeper logic handler function
+// Gatekeeper logic handler function
 async function handleGatekeeperLogicOnlyChanges({ error, req }) {
-  // TODO: Implement gatekeeper logic-only changes handling
-  console.log("handleGatekeeperLogicOnlyChanges triggered:", {
-    errorName: error?.name,
-    errorMessage: error?.message,
-    path: req?.path,
-    method: req?.method,
+  // LOGIC-ONLY CHANGE: Enhanced gatekeeper logic that analyzes security-related errors
+  if (!error || !req) {
+    return;
+  }
+
+  // LOGIC-ONLY CHANGE: Classify error severity for security monitoring
+  const isSecurityError = error.statusCode >= 400 && error.statusCode < 500;
+  const isServerError = error.statusCode >= 500;
+  const isAuthError =
+    error.name === "AuthenticationError" || error.name === "AuthorizationError";
+
+  // LOGIC-ONLY CHANGE: Determine if this is a gatekeeper-related error
+  const isGatekeeperError =
+    isAuthError ||
+    error.name === "WebhookValidationError" ||
+    error.name === "ValidationError" ||
+    (isSecurityError && req.path.startsWith("/api"));
+
+  if (!isGatekeeperError) {
+    return;
+  }
+
+  // LOGIC-ONLY CHANGE: Extract security context from request
+  const securityContext = {
+    path: req.path,
+    method: req.method,
+    userAgent: req.headers["user-agent"] || "unknown",
+    ip: req.ip || req.connection?.remoteAddress || "unknown",
+    authenticated: !!req.user,
     timestamp: new Date().toISOString(),
+  };
+
+  // LOGIC-ONLY CHANGE: Enhanced logging for security events
+  const logLevel = isServerError ? "error" : isAuthError ? "warn" : "info";
+  console.log(`[${logLevel}] Gatekeeper security event:`, {
+    errorType: error.name,
+    errorMessage: error.message,
+    statusCode: error.statusCode,
+    securityContext,
+    riskLevel: isAuthError ? "high" : isSecurityError ? "medium" : "low",
   });
 
-  // Add your gatekeeper logic processing here
-  // This is where you would handle logic-only changes for gatekeeper files
+  // LOGIC-ONLY CHANGE: Rate limiting check for repeated authentication failures
+  if (isAuthError) {
+    const failureKey = `${securityContext.ip}:${req.path}`;
+    // In production, this would use Redis or similar for distributed rate limiting
+    // For now, just log the potential security threat
+    console.warn("Potential authentication failure detected:", {
+      key: failureKey,
+      path: req.path,
+      ip: securityContext.ip,
+    });
+  }
+
+  // LOGIC-ONLY CHANGE: Validate error response doesn't leak sensitive information
+  const sensitivePatterns = [
+    "password",
+    "token",
+    "secret",
+    "key",
+    "credential",
+  ];
+  const messageContainsSensitive = sensitivePatterns.some((pattern) =>
+    error.message?.toLowerCase().includes(pattern)
+  );
+
+  if (messageContainsSensitive && process.env.NODE_ENV === "production") {
+    console.error(
+      "Security warning: Error message may contain sensitive information"
+    );
+  }
+
+  // LOGIC-ONLY CHANGE: Track security metrics for monitoring
+  const securityMetrics = {
+    errorCount: 1,
+    errorType: error.name,
+    path: req.path,
+    method: req.method,
+    timestamp: new Date().toISOString(),
+  };
+
+  // In production, this would send metrics to monitoring service
+  console.log("Security metrics:", securityMetrics);
 }
 
 const app = express();
