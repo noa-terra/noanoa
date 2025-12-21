@@ -30,4 +30,6 @@ function startServer() {
 // Initialize server
 setupMiddleware();
 setupRoutes();
+app.use(errorHandler);
+app.use(notFoundHandler);
 startServer();
