@@ -4,7 +4,6 @@ const itemsRoutes = require("./itemsRoutes");
 const usersRoutes = require("./usersRoutes");
 const productsRoutes = require("./productsRoutes");
 const ordersRoutes = require("./ordersRoutes");
-const reviewsRoutes = require("./reviewsRoutes");
 
 // Import middleware from separate files (these will be recognized as gatekeepers)
 const loggingMiddleware = require("./middleware/logging.middleware");
@@ -27,7 +26,6 @@ function setupRoutes() {
   app.use("/api/users", usersRoutes);
   app.use("/api/products", productsRoutes);
   app.use("/api/orders", ordersRoutes);
-  app.use("/api/reviews", reviewsRoutes);
 }
 
 // Start server function
