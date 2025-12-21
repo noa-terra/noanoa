@@ -1,5 +1,8 @@
 const express = require("express");
 const path = require("path");
+const itemsRoutes = require("./itemsRoutes");
+const usersRoutes = require("./usersRoutes");
+const productsRoutes = require("./productsRoutes");
 const ordersRoutes = require("./ordersRoutes");
 
 // Import middleware from separate files (these will be recognized as gatekeepers)
@@ -19,6 +22,9 @@ function setupMiddleware() {
 
 // Setup routes function
 function setupRoutes() {
+  app.use("/api/items", itemsRoutes);
+  app.use("/api/users", usersRoutes);
+  app.use("/api/products", productsRoutes);
   app.use("/api/orders", ordersRoutes);
 }
 
