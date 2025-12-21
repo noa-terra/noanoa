@@ -4,18 +4,12 @@ const itemsRoutes = require("./itemsRoutes");
 const productsRoutes = require("./productsRoutes");
 const ordersRoutes = require("./ordersRoutes");
 
-// Import middleware from separate files (these will be recognized as gatekeepers)
-const loggingMiddleware = require("./middleware/logging.middleware");
-const errorHandler = require("./middleware/error-handler.middleware");
-const notFoundHandler = require("./middleware/not-found.middleware");
-
 const app = express();
 const PORT = process.env.PORT || 4000;
 
 // Setup middleware function
 function setupMiddleware() {
   app.use(express.json());
-  app.use(loggingMiddleware);
   app.use(express.static(path.join(__dirname, "..", "public")));
 }
 
@@ -36,6 +30,4 @@ function startServer() {
 // Initialize server
 setupMiddleware();
 setupRoutes();
-app.use(errorHandler);
-app.use(notFoundHandler);
 startServer();
