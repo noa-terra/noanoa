@@ -1,6 +1,5 @@
 const express = require("express");
 const path = require("path");
-const itemsRoutes = require("./itemsRoutes");
 const productsRoutes = require("./productsRoutes");
 const ordersRoutes = require("./ordersRoutes");
 
@@ -21,7 +20,6 @@ function setupMiddleware() {
 
 // Setup routes function
 function setupRoutes() {
-  app.use("/api/items", itemsRoutes);
   app.use("/api/products", productsRoutes);
   app.use("/api/orders", ordersRoutes);
 }
