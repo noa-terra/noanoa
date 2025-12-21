@@ -1,4 +1,4 @@
-const productsService = require('./productsService');
+const productsService = require("./productsService");
 
 const ProductsController = {
   getAll(req, res) {
@@ -25,7 +25,7 @@ const ProductsController = {
     try {
       const { name, price, category, stock } = req.body;
       if (!name || !price) {
-        return res.status(400).json({ error: 'Name and price are required' });
+        return res.status(400).json({ error: "Name and price are required" });
       }
       const product = productsService.create({ name, price, category, stock });
       res.status(201).json(product);
@@ -55,20 +55,13 @@ const ProductsController = {
     }
   },
 
-  getStats(req, res) {
-    try {
-      const stats = productsService.getStats();
-      res.json(stats);
-    } catch (err) {
-      res.status(err.statusCode || 500).json({ error: err.message });
-    }
-  },
-
   search(req, res) {
     try {
       const { q } = req.query;
       if (!q) {
-        return res.status(400).json({ error: 'Search query parameter "q" is required' });
+        return res
+          .status(400)
+          .json({ error: 'Search query parameter "q" is required' });
       }
       const results = productsService.search(q);
       res.json(results);
@@ -89,4 +82,3 @@ const ProductsController = {
 };
 
 module.exports = ProductsController;
-
