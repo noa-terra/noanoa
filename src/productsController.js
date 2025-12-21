@@ -1,4 +1,4 @@
-const productsService = require('./productsService');
+const productsService = require("./productsService");
 
 const ProductsController = {
   getAll(req, res) {
@@ -25,7 +25,19 @@ const ProductsController = {
     try {
       const { name, price, category, stock } = req.body;
       if (!name || !price) {
-        return res.status(400).json({ error: 'Name and price are required' });
+        return res.status(400).json({ error: "Name and price are required" });
+      }
+      // Enhanced validation: ensure price is a positive number
+      if (typeof price !== "number" || price <= 0) {
+        return res
+          .status(400)
+          .json({ error: "Price must be a positive number" });
+      }
+      // Validate stock if provided
+      if (stock !== undefined && (typeof stock !== "number" || stock < 0)) {
+        return res
+          .status(400)
+          .json({ error: "Stock must be a non-negative number" });
       }
       const product = productsService.create({ name, price, category, stock });
       res.status(201).json(product);
@@ -68,7 +80,9 @@ const ProductsController = {
     try {
       const { q } = req.query;
       if (!q) {
-        return res.status(400).json({ error: 'Search query parameter "q" is required' });
+        return res
+          .status(400)
+          .json({ error: 'Search query parameter "q" is required' });
       }
       const results = productsService.search(q);
       res.json(results);
@@ -89,4 +103,3 @@ const ProductsController = {
 };
 
 module.exports = ProductsController;
-
