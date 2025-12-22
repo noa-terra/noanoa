@@ -183,5 +183,28 @@ function loggingMiddleware(req, res, next) {
   // Attach request ID to response headers for tracking
   res.setHeader("X-Request-ID", requestId);
 
+  // Add CORS headers for API routes
+  if (req.path.startsWith("/api")) {
+    const origin = req.headers.origin;
+    const allowedOrigins = [
+      "http://localhost:3000",
+      "http://localhost:4000",
+      "https://noam.king:4000"
+    ];
+    
+    if (origin && allowedOrigins.includes(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    }
+    
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Max-Age", "86400"); // 24 hours
+    
+    // Handle preflight OPTIONS requests
+    if (req.method === "OPTIONS") {
+      return res.status(200).end();
+    }
+  }
+
   next();
 }
