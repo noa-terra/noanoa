@@ -278,6 +278,74 @@ function loggingMiddleware(req, res, next) {
   // Attach request ID to response headers for tracking
   res.setHeader("X-Request-ID", requestId);
 
+  // Request content negotiation
+  if (req.path.startsWith("/api")) {
+    const acceptHeader = req.get("accept") || "*/*";
+    const acceptLanguage = req.get("accept-language") || "en";
+    const acceptCharset = req.get("accept-charset") || "utf-8";
+    
+    // Parse Accept header for content type preferences
+    const acceptedTypes = acceptHeader.split(",").map(type => {
+      const parts = type.trim().split(";");
+      const mimeType = parts[0].trim();
+      const quality = parts[1] ? parseFloat(parts[1].split("=")[1]) || 1.0 : 1.0;
+      return { type: mimeType, quality };
+    }).sort((a, b) => b.quality - a.quality);
+    
+    // Find best match
+    const supportedTypes = ["application/json", "application/xml", "text/json", "text/plain"];
+    const bestMatch = acceptedTypes.find(accepted => 
+      supportedTypes.some(supported => 
+        accepted.type === supported || 
+        accepted.type === "*/*" || 
+        accepted.type.includes(supported.split("/")[0])
+      )
+    );
+    
+    // Set response content type based on negotiation
+    if (bestMatch) {
+      const responseType = bestMatch.type === "*/*" ? "application/json" : 
+                          bestMatch.type.includes("json") ? "application/json" :
+                          bestMatch.type.includes("xml") ? "application/xml" :
+                          "application/json";
+      res.setHeader("Content-Type", `${responseType}; charset=utf-8`);
+      req.negotiatedContentType = responseType;
+    } else {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      req.negotiatedContentType = "application/json";
+    }
+    
+    // Parse Accept-Language header
+    const languages = acceptLanguage.split(",").map(lang => {
+      const parts = lang.trim().split(";");
+      const language = parts[0].trim();
+      const quality = parts[1] ? parseFloat(parts[1].split("=")[1]) || 1.0 : 1.0;
+      return { language, quality };
+    }).sort((a, b) => b.quality - a.quality);
+    
+    // Set preferred language
+    const supportedLanguages = ["en", "es", "fr", "de"];
+    const preferredLanguage = languages.find(lang => 
+      supportedLanguages.includes(lang.language.split("-")[0])
+    )?.language.split("-")[0] || "en";
+    
+    req.preferredLanguage = preferredLanguage;
+    res.setHeader("Content-Language", preferredLanguage);
+    
+    // Log content negotiation
+    if (bestMatch && bestMatch.type !== "*/*") {
+      console.log(
+        `[${requestId}] 🌐 Content negotiation: ${bestMatch.type} (quality: ${bestMatch.quality}) for ${req.method} ${req.path}`
+      );
+    }
+    
+    if (preferredLanguage !== "en") {
+      console.log(
+        `[${requestId}] 🌍 Language preference: ${preferredLanguage} for ${req.method} ${req.path}`
+      );
+    }
+  }
+
   // Request/Response size monitoring
   if (req.path.startsWith("/api")) {
     const requestSize = parseInt(req.get("content-length") || "0", 10);
