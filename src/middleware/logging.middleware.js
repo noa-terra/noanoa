@@ -254,6 +254,75 @@ function loggingMiddleware(req, res, next) {
   // Attach request ID to response headers for tracking
   res.setHeader("X-Request-ID", requestId);
 
+  // API key validation for API routes
+  if (req.path.startsWith("/api")) {
+    const apiKey = req.get("x-api-key") || req.get("api-key") || req.query.apiKey;
+    
+    // Define valid API keys (in production, these should be in a database or config)
+    const validApiKeys = new Set(); // Add valid API keys here if needed
+    
+    // Only validate API key if validApiKeys set is populated
+    if (validApiKeys.size > 0) {
+      if (!apiKey) {
+        console.warn(
+          `[${requestId}] ⚠️  Missing API key for ${req.method} ${req.path} from IP: ${clientIp}`
+        );
+        return res.status(401).json({
+          error: "Unauthorized",
+          message: "API key is required",
+        });
+      }
+      
+      if (!validApiKeys.has(apiKey)) {
+        console.error(
+          `[${requestId}] 🚨 Invalid API key attempt for ${req.method} ${req.path} from IP: ${clientIp}`
+        );
+        return res.status(401).json({
+          error: "Unauthorized",
+          message: "Invalid API key",
+        });
+      }
+      
+      // Attach API key info to request for use in routes
+      req.apiKey = apiKey;
+      console.log(`[${requestId}] ✅ Valid API key used for ${req.method} ${req.path}`);
+    }
+  }
+
+  // Request signature validation for API routes (optional)
+  if (req.path.startsWith("/api") && req.get("x-signature")) {
+    const signature = req.get("x-signature");
+    const timestamp = req.get("x-timestamp");
+    const signatureSecret = process.env.SIGNATURE_SECRET || "default-secret";
+    
+    // Validate timestamp to prevent replay attacks (5 minute window)
+    if (timestamp) {
+      const requestTime = parseInt(timestamp, 10);
+      const currentTime = Math.floor(Date.now() / 1000);
+      const timeDiff = Math.abs(currentTime - requestTime);
+      
+      if (timeDiff > 300) { // 5 minutes
+        console.warn(
+          `[${requestId}] ⚠️  Request timestamp expired: ${timeDiff}s difference for ${req.method} ${req.path}`
+        );
+        return res.status(401).json({
+          error: "Unauthorized",
+          message: "Request timestamp expired",
+        });
+      }
+    }
+    
+    // In production, implement actual signature verification using HMAC
+    // For now, just log that signature was provided
+    console.log(
+      `[${requestId}] 🔐 Request signature provided for ${req.method} ${req.path}`
+    );
+    
+    // Attach signature info to request
+    req.hasSignature = true;
+    req.signatureTimestamp = timestamp;
+  }
+
   // Request correlation tracking
   const correlationId = req.get("x-correlation-id") || req.get("correlation-id") || requestId;
   req.correlationId = correlationId;
