@@ -183,6 +183,54 @@ function loggingMiddleware(req, res, next) {
   // Attach request ID to response headers for tracking
   res.setHeader("X-Request-ID", requestId);
 
+  // Request header validation for API routes
+  if (req.path.startsWith("/api")) {
+    // Validate Content-Type for POST/PUT/PATCH requests with body
+    if (["POST", "PUT", "PATCH"].includes(req.method)) {
+      const contentType = req.get("content-type");
+      if (!contentType) {
+        console.warn(
+          `[${requestId}] ⚠️  Missing Content-Type header for ${req.method} ${req.path}`
+        );
+        return res.status(400).json({
+          error: "Bad Request",
+          message: "Content-Type header is required for this request",
+        });
+      }
+      
+      // Validate Content-Type format
+      const validContentTypes = [
+        "application/json",
+        "application/x-www-form-urlencoded",
+        "multipart/form-data",
+      ];
+      const isValidContentType = validContentTypes.some((type) =>
+        contentType.includes(type)
+      );
+      
+      if (!isValidContentType) {
+        console.warn(
+          `[${requestId}] ⚠️  Invalid Content-Type: ${contentType} for ${req.method} ${req.path}`
+        );
+        return res.status(400).json({
+          error: "Bad Request",
+          message: `Invalid Content-Type. Supported types: ${validContentTypes.join(", ")}`,
+        });
+      }
+    }
+    
+    // Validate Accept header for GET requests
+    if (req.method === "GET") {
+      const accept = req.get("accept");
+      if (accept && !accept.includes("application/json") && !accept.includes("*/*")) {
+        console.warn(
+          `[${requestId}] ⚠️  Unsupported Accept header: ${accept} for ${req.path}`
+        );
+        // Don't block, just log - some clients may send different Accept headers
+      }
+    }
+  }
+
   // Add CORS headers for API routes
   if (req.path.startsWith("/api")) {
     const origin = req.headers.origin;
