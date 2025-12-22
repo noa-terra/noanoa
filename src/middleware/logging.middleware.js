@@ -567,6 +567,147 @@ function loggingMiddleware(req, res, next) {
     requestMetrics.loadBalancingStats.set(lbKey, lbStats);
   }
 
+  // Request timezone handling
+  if (req.path.startsWith("/api")) {
+    const timezone = req.get("x-timezone") || req.get("timezone") || req.query.timezone || "UTC";
+    const timezoneOffset = req.get("x-timezone-offset") || req.get("timezone-offset") || req.query.timezoneOffset;
+    
+    // Validate timezone format (basic validation)
+    const validTimezones = [
+      "UTC", "GMT", "EST", "PST", "CST", "MST", "EDT", "PDT", "CDT", "MDT",
+      "America/New_York", "America/Los_Angeles", "America/Chicago", "America/Denver",
+      "Europe/London", "Europe/Paris", "Europe/Berlin", "Asia/Tokyo", "Asia/Shanghai",
+      "Australia/Sydney", "Australia/Melbourne"
+    ];
+    
+    // Check if timezone is valid (exact match or starts with valid prefix)
+    const isValidTimezone = validTimezones.some(tz => 
+      timezone === tz || timezone.startsWith(tz.split("/")[0])
+    ) || timezone.match(/^[+-]\d{2}:\d{2}$/); // ISO 8601 offset format
+    
+    if (!isValidTimezone && timezone !== "UTC") {
+      console.warn(
+        `[${requestId}] ⚠️  Invalid timezone format: ${timezone} for ${req.method} ${req.path}`
+      );
+      // Default to UTC if invalid
+      req.timezone = "UTC";
+    } else {
+      req.timezone = timezone;
+    }
+    
+    // Parse timezone offset if provided
+    if (timezoneOffset) {
+      const offsetMatch = timezoneOffset.match(/^([+-])(\d{2}):?(\d{2})$/);
+      if (offsetMatch) {
+        const sign = offsetMatch[1] === "+" ? 1 : -1;
+        const hours = parseInt(offsetMatch[2], 10);
+        const minutes = parseInt(offsetMatch[3], 10);
+        req.timezoneOffset = sign * (hours * 60 + minutes); // Offset in minutes
+        console.log(
+          `[${requestId}] 🕐 Timezone offset: ${timezoneOffset} (${req.timezoneOffset} minutes) for ${req.method} ${req.path}`
+        );
+      }
+    }
+    
+    // Attach timezone info to response headers
+    res.setHeader("X-Request-Timezone", req.timezone);
+    if (req.timezoneOffset !== undefined) {
+      res.setHeader("X-Request-Timezone-Offset", req.timezoneOffset.toString());
+    }
+    
+    // Log timezone info
+    if (timezone !== "UTC") {
+      console.log(
+        `[${requestId}] 🕐 Request timezone: ${timezone} for ${req.method} ${req.path}`
+      );
+    }
+  }
+
+  // Request device fingerprinting
+  if (req.path.startsWith("/api")) {
+    const userAgent = req.get("user-agent") || "";
+    const acceptLanguage = req.get("accept-language") || "";
+    const acceptEncoding = req.get("accept-encoding") || "";
+    const acceptCharset = req.get("accept-charset") || "";
+    const connection = req.get("connection") || "";
+    const dnt = req.get("dnt"); // Do Not Track
+    const viewportWidth = req.get("x-viewport-width") || req.get("viewport-width");
+    const viewportHeight = req.get("x-viewport-height") || req.get("viewport-height");
+    const screenResolution = req.get("x-screen-resolution") || req.get("screen-resolution");
+    const colorDepth = req.get("x-color-depth") || req.get("color-depth");
+    const timezoneOffset = req.timezoneOffset || 0;
+    
+    // Create device fingerprint from available headers
+    const fingerprintComponents = [
+      userAgent,
+      acceptLanguage.split(",")[0], // Primary language
+      acceptEncoding,
+      acceptCharset,
+      connection,
+      dnt || "none",
+      viewportWidth || "unknown",
+      viewportHeight || "unknown",
+      screenResolution || "unknown",
+      colorDepth || "unknown",
+      timezoneOffset.toString(),
+    ];
+    
+    // Generate simple hash-like fingerprint (in production, use crypto)
+    const fingerprintString = fingerprintComponents.join("|");
+    let fingerprintHash = 0;
+    for (let i = 0; i < fingerprintString.length; i++) {
+      const char = fingerprintString.charCodeAt(i);
+      fingerprintHash = ((fingerprintHash << 5) - fingerprintHash) + char;
+      fingerprintHash = fingerprintHash & fingerprintHash; // Convert to 32-bit integer
+    }
+    
+    const deviceFingerprint = Math.abs(fingerprintHash).toString(36);
+    req.deviceFingerprint = deviceFingerprint;
+    res.setHeader("X-Device-Fingerprint", deviceFingerprint);
+    
+    // Track device fingerprint in metrics
+    if (!requestMetrics.deviceFingerprints) {
+      requestMetrics.deviceFingerprints = new Map();
+    }
+    
+    const fpStats = requestMetrics.deviceFingerprints.get(deviceFingerprint) || {
+      requestCount: 0,
+      firstSeen: Date.now(),
+      lastSeen: Date.now(),
+      userAgents: new Set(),
+    };
+    
+    fpStats.requestCount++;
+    fpStats.lastSeen = Date.now();
+    fpStats.userAgents.add(userAgent);
+    requestMetrics.deviceFingerprints.set(deviceFingerprint, fpStats);
+    
+    // Log device fingerprint info
+    if (fpStats.requestCount === 1) {
+      console.log(
+        `[${requestId}] 📱 New device fingerprint: ${deviceFingerprint} for ${req.method} ${req.path}`
+      );
+    }
+    
+    // Detect suspicious patterns (same fingerprint, many different user agents)
+    if (fpStats.userAgents.size > 5 && fpStats.requestCount > 10) {
+      console.warn(
+        `[${requestId}] ⚠️  Suspicious device fingerprint detected: ${deviceFingerprint} with ${fpStats.userAgents.size} different user agents`
+      );
+    }
+    
+    // Attach device info to request
+    req.deviceInfo = {
+      fingerprint: deviceFingerprint,
+      userAgent: userAgent,
+      viewportWidth: viewportWidth,
+      viewportHeight: viewportHeight,
+      screenResolution: screenResolution,
+      colorDepth: colorDepth,
+      timezoneOffset: timezoneOffset,
+    };
+  }
+
   // Request idempotency key handling for state-changing operations
   if (req.path.startsWith("/api") && ["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
     const idempotencyKey = req.get("idempotency-key") || req.get("x-idempotency-key");
