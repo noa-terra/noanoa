@@ -278,6 +278,75 @@ function loggingMiddleware(req, res, next) {
   // Attach request ID to response headers for tracking
   res.setHeader("X-Request-ID", requestId);
 
+  // Request/Response size monitoring
+  if (req.path.startsWith("/api")) {
+    const requestSize = parseInt(req.get("content-length") || "0", 10);
+    const maxRequestSize = 10 * 1024 * 1024; // 10MB
+    const maxResponseSize = 10 * 1024 * 1024; // 10MB
+    
+    // Track request size in metrics
+    if (requestSize > 0) {
+      const sizeCategory = requestSize < 1024 ? "small" : 
+                          requestSize < 1024 * 1024 ? "medium" : 
+                          requestSize < 5 * 1024 * 1024 ? "large" : "xlarge";
+      
+      // Log large requests
+      if (requestSize > 1024 * 1024) {
+        console.log(
+          `[${requestId}] 📦 Large request detected: ${(requestSize / 1024 / 1024).toFixed(2)}MB for ${req.method} ${req.path}`
+        );
+      }
+      
+      // Warn about very large requests
+      if (requestSize > maxRequestSize * 0.8) {
+        console.warn(
+          `[${requestId}] ⚠️  Request size approaching limit: ${(requestSize / 1024 / 1024).toFixed(2)}MB (limit: ${maxRequestSize / 1024 / 1024}MB)`
+        );
+      }
+    }
+    
+    // Store response size monitoring flag
+    req.monitorResponseSize = true;
+    req.maxResponseSize = maxResponseSize;
+  }
+
+  // Request retry handling
+  if (req.path.startsWith("/api")) {
+    const retryCount = parseInt(req.get("x-retry-count") || req.get("retry-count") || "0", 10);
+    const maxRetries = 3;
+    
+    if (retryCount > 0) {
+      console.log(
+        `[${requestId}] 🔄 Retry attempt ${retryCount} for ${req.method} ${req.path}`
+      );
+      
+      // Track retry attempts in metrics
+      const retryKey = `${req.method}:${req.path}`;
+      const currentRetryCount = requestMetrics.retriesByEndpoint?.get(retryKey) || 0;
+      if (!requestMetrics.retriesByEndpoint) {
+        requestMetrics.retriesByEndpoint = new Map();
+      }
+      requestMetrics.retriesByEndpoint.set(retryKey, currentRetryCount + 1);
+      
+      // Warn about excessive retries
+      if (retryCount > maxRetries) {
+        console.warn(
+          `[${requestId}] ⚠️  Excessive retry attempts: ${retryCount} (max: ${maxRetries}) for ${req.method} ${req.path}`
+        );
+        return res.status(429).json({
+          error: "Too Many Retries",
+          message: `Maximum retry attempts (${maxRetries}) exceeded`,
+          retryCount: retryCount,
+          maxRetries: maxRetries,
+        });
+      }
+      
+      // Add retry info to response headers
+      res.setHeader("X-Retry-Count", retryCount.toString());
+      res.setHeader("X-Max-Retries", maxRetries.toString());
+    }
+  }
+
   // Request feature flags
   const featureFlags = {
     enableAdvancedLogging: process.env.ENABLE_ADVANCED_LOGGING === "true",
