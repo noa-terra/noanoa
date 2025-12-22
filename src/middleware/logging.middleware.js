@@ -183,6 +183,82 @@ function loggingMiddleware(req, res, next) {
   // Attach request ID to response headers for tracking
   res.setHeader("X-Request-ID", requestId);
 
+  // Query parameter validation and sanitization for API routes
+  if (req.path.startsWith("/api")) {
+    // Validate query parameter length
+    const maxQueryLength = 2048; // Max total query string length
+    const queryString = req.url.split("?")[1] || "";
+    if (queryString.length > maxQueryLength) {
+      console.warn(
+        `[${requestId}] ⚠️  Query string too long: ${queryString.length} characters (max: ${maxQueryLength})`
+      );
+      return res.status(400).json({
+        error: "Bad Request",
+        message: "Query string exceeds maximum length",
+      });
+    }
+
+    // Validate individual query parameter values
+    const maxParamValueLength = 500;
+    const suspiciousQueryPatterns = [
+      /<script/i, // XSS attempts
+      /javascript:/i, // JavaScript protocol
+      /on\w+\s*=/i, // Event handlers
+      /eval\(/i, // Code injection
+    ];
+
+    for (const [key, value] of Object.entries(req.query)) {
+      // Check parameter value length
+      const paramValue = Array.isArray(value) ? value.join(",") : String(value);
+      if (paramValue.length > maxParamValueLength) {
+        console.warn(
+          `[${requestId}] ⚠️  Query parameter value too long: ${key} (${paramValue.length} chars)`
+        );
+        return res.status(400).json({
+          error: "Bad Request",
+          message: `Query parameter '${key}' value exceeds maximum length`,
+        });
+      }
+
+      // Check for suspicious patterns in query values
+      const isSuspicious = suspiciousQueryPatterns.some((pattern) =>
+        pattern.test(paramValue)
+      );
+      if (isSuspicious) {
+        console.error(
+          `[${requestId}] 🚨 Suspicious query parameter detected: ${key}=${paramValue.substring(0, 50)}...`
+        );
+        return res.status(400).json({
+          error: "Bad Request",
+          message: "Invalid query parameter value",
+        });
+      }
+
+      // Sanitize parameter keys (remove any non-alphanumeric except underscore and dash)
+      if (!/^[a-zA-Z0-9_-]+$/.test(key)) {
+        console.warn(
+          `[${requestId}] ⚠️  Invalid query parameter key format: ${key}`
+        );
+        return res.status(400).json({
+          error: "Bad Request",
+          message: "Invalid query parameter key format",
+        });
+      }
+    }
+
+    // Limit number of query parameters
+    const maxQueryParams = 20;
+    if (Object.keys(req.query).length > maxQueryParams) {
+      console.warn(
+        `[${requestId}] ⚠️  Too many query parameters: ${Object.keys(req.query).length} (max: ${maxQueryParams})`
+      );
+      return res.status(400).json({
+        error: "Bad Request",
+        message: `Too many query parameters. Maximum allowed: ${maxQueryParams}`,
+      });
+    }
+  }
+
   // Request header validation for API routes
   if (req.path.startsWith("/api")) {
     // Validate Content-Type for POST/PUT/PATCH requests with body
