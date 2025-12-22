@@ -254,6 +254,86 @@ function loggingMiddleware(req, res, next) {
   // Attach request ID to response headers for tracking
   res.setHeader("X-Request-ID", requestId);
 
+  // Request caching headers for GET requests
+  if (req.method === "GET" && req.path.startsWith("/api")) {
+    const cacheControl = req.get("cache-control");
+    const ifNoneMatch = req.get("if-none-match");
+    const ifModifiedSince = req.get("if-modified-since");
+    
+    // Set default cache headers for GET requests
+    const defaultCacheMaxAge = 300; // 5 minutes
+    res.setHeader("Cache-Control", `public, max-age=${defaultCacheMaxAge}`);
+    res.setHeader("ETag", `"${requestId}"`);
+    res.setHeader("Last-Modified", new Date().toUTCString());
+    
+    // Handle conditional requests (304 Not Modified)
+    if (ifNoneMatch && ifNoneMatch === `"${requestId}"`) {
+      console.log(`[${requestId}] Conditional request - ETag match for ${req.path}`);
+      return res.status(304).end();
+    }
+    
+    if (ifModifiedSince) {
+      const modifiedSince = new Date(ifModifiedSince);
+      const now = new Date();
+      // If resource hasn't been modified, return 304
+      if (modifiedSince >= now) {
+        console.log(`[${requestId}] Conditional request - Not modified for ${req.path}`);
+        return res.status(304).end();
+      }
+    }
+    
+    // Respect client cache preferences
+    if (cacheControl && cacheControl.includes("no-cache")) {
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+    }
+  }
+
+  // Request/Response transformation for API routes
+  if (req.path.startsWith("/api")) {
+    // Transform request headers (normalize case, remove duplicates)
+    const normalizedHeaders = {};
+    for (const [key, value] of Object.entries(req.headers)) {
+      const normalizedKey = key.toLowerCase();
+      if (!normalizedHeaders[normalizedKey]) {
+        normalizedHeaders[normalizedKey] = value;
+      }
+    }
+    
+    // Attach normalized headers to request
+    req.normalizedHeaders = normalizedHeaders;
+    
+    // Add response transformation wrapper
+    const originalJson = res.json;
+    res.json = function (body) {
+      // Transform response body if needed
+      if (body && typeof body === "object") {
+        // Add metadata to response
+        const transformedBody = {
+          ...body,
+          meta: {
+            requestId: requestId,
+            timestamp: timestamp,
+            version: req.apiVersion || "v1",
+          },
+        };
+        
+        // Remove sensitive data from response if present
+        if (transformedBody.password) {
+          delete transformedBody.password;
+        }
+        if (transformedBody.token) {
+          delete transformedBody.token;
+        }
+        
+        return originalJson.call(this, transformedBody);
+      }
+      
+      return originalJson.call(this, body);
+    };
+  }
+
   // API key validation for API routes
   if (req.path.startsWith("/api")) {
     const apiKey = req.get("x-api-key") || req.get("api-key") || req.query.apiKey;
