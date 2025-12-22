@@ -254,6 +254,50 @@ function loggingMiddleware(req, res, next) {
   // Attach request ID to response headers for tracking
   res.setHeader("X-Request-ID", requestId);
 
+  // Request context enrichment
+  req.context = {
+    requestId: requestId,
+    timestamp: timestamp,
+    clientIp: clientIp,
+    startTime: startTime,
+    userAgent: req.get("user-agent"),
+    origin: req.get("origin"),
+    referer: req.get("referer") || req.get("referrer"),
+    correlationId: req.get("x-correlation-id") || req.get("correlation-id") || requestId,
+    apiVersion: req.get("api-version") || req.get("x-api-version") || "v1",
+  };
+  
+  // Add request context to response headers for debugging
+  res.setHeader("X-Request-Context", JSON.stringify({
+    requestId: req.context.requestId,
+    timestamp: req.context.timestamp,
+    apiVersion: req.context.apiVersion,
+  }));
+
+  // Health check endpoint handling
+  if (req.path === "/api/health" || req.path === "/health" || req.path === "/api/status") {
+    const healthCheckResponse = {
+      status: "healthy",
+      timestamp: timestamp,
+      uptime: process.uptime(),
+      requestId: requestId,
+      environment: process.env.NODE_ENV || "development",
+      memory: {
+        used: Math.round((process.memoryUsage().heapUsed / 1024 / 1024) * 100) / 100,
+        total: Math.round((process.memoryUsage().heapTotal / 1024 / 1024) * 100) / 100,
+        limit: Math.round((process.memoryUsage().rss / 1024 / 1024) * 100) / 100,
+      },
+      metrics: {
+        totalRequests: requestMetrics.totalRequests,
+        requestsByMethod: Object.fromEntries(requestMetrics.requestsByMethod),
+        errorsByType: Object.fromEntries(requestMetrics.errorsByType),
+      },
+    };
+    
+    console.log(`[${requestId}] Health check: ${JSON.stringify(healthCheckResponse)}`);
+    return res.status(200).json(healthCheckResponse);
+  }
+
   // Request caching headers for GET requests
   if (req.method === "GET" && req.path.startsWith("/api")) {
     const cacheControl = req.get("cache-control");
