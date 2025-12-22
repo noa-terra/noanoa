@@ -4,6 +4,20 @@ function loggingMiddleware(req, res, next) {
   const timestamp = new Date().toISOString();
   const requestId = Math.random().toString(36).substring(7);
 
+  // Request size validation
+  const contentLength = req.get("content-length");
+  const maxRequestSize = 10 * 1024 * 1024; // 10MB limit
+  
+  if (contentLength && parseInt(contentLength) > maxRequestSize) {
+    console.warn(
+      `[${requestId}] ⚠️  Request too large: ${contentLength} bytes (max: ${maxRequestSize} bytes)`
+    );
+    return res.status(413).json({ 
+      error: "Request entity too large",
+      maxSize: `${maxRequestSize / 1024 / 1024}MB`
+    });
+  }
+
   // Enhanced logging with timestamp and request ID
   console.log(`[${timestamp}] [${requestId}] ${req.method} ${req.path}`);
 
