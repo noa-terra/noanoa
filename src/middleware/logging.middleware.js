@@ -254,6 +254,69 @@ function loggingMiddleware(req, res, next) {
   // Attach request ID to response headers for tracking
   res.setHeader("X-Request-ID", requestId);
 
+  // API versioning support
+  if (req.path.startsWith("/api")) {
+    const apiVersion = req.get("api-version") || req.get("x-api-version") || "v1";
+    const supportedVersions = ["v1", "v2"];
+    
+    if (!supportedVersions.includes(apiVersion)) {
+      console.warn(
+        `[${requestId}] ⚠️  Unsupported API version: ${apiVersion} for ${req.method} ${req.path}`
+      );
+      return res.status(400).json({
+        error: "Bad Request",
+        message: `Unsupported API version. Supported versions: ${supportedVersions.join(", ")}`,
+        supportedVersions: supportedVersions,
+      });
+    }
+    
+    // Attach API version to request object for use in routes
+    req.apiVersion = apiVersion;
+    res.setHeader("X-API-Version", apiVersion);
+    
+    // Log API version usage
+    console.log(`[${requestId}] API Version: ${apiVersion} for ${req.method} ${req.path}`);
+  }
+
+  // Request compression detection and validation
+  const contentEncoding = req.get("content-encoding");
+  if (contentEncoding) {
+    const supportedEncodings = ["gzip", "deflate", "br"];
+    const encodingList = contentEncoding.split(",").map((e) => e.trim().toLowerCase());
+    
+    const unsupportedEncodings = encodingList.filter(
+      (enc) => !supportedEncodings.includes(enc)
+    );
+    
+    if (unsupportedEncodings.length > 0) {
+      console.warn(
+        `[${requestId}] ⚠️  Unsupported content encoding: ${unsupportedEncodings.join(", ")}`
+      );
+      return res.status(415).json({
+        error: "Unsupported Media Type",
+        message: `Unsupported content encoding: ${unsupportedEncodings.join(", ")}`,
+        supportedEncodings: supportedEncodings,
+      });
+    }
+    
+    console.log(
+      `[${requestId}] Request compression detected: ${contentEncoding} for ${req.method} ${req.path}`
+    );
+  }
+
+  // Response compression preference
+  const acceptEncoding = req.get("accept-encoding");
+  if (acceptEncoding) {
+    // Store preferred encoding for response compression
+    if (acceptEncoding.includes("br")) {
+      res.setHeader("Content-Encoding", "br");
+    } else if (acceptEncoding.includes("gzip")) {
+      res.setHeader("Content-Encoding", "gzip");
+    } else if (acceptEncoding.includes("deflate")) {
+      res.setHeader("Content-Encoding", "deflate");
+    }
+  }
+
   // Add security headers for all responses
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
