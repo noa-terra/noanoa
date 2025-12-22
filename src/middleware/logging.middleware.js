@@ -183,6 +183,83 @@ function loggingMiddleware(req, res, next) {
   // Attach request ID to response headers for tracking
   res.setHeader("X-Request-ID", requestId);
 
+  // Request timeout handling
+  const requestTimeout = 30000; // 30 seconds
+  const timeoutId = setTimeout(() => {
+    if (!res.headersSent) {
+      console.error(
+        `[${requestId}] ⏱️  Request timeout: ${req.method} ${req.path} exceeded ${requestTimeout}ms`
+      );
+      res.status(408).json({
+        error: "Request Timeout",
+        message: "The request took too long to process",
+        requestId: requestId,
+      });
+    }
+  }, requestTimeout);
+
+  // Clear timeout when response is sent
+  const originalEnd = res.end;
+  res.end = function (...args) {
+    clearTimeout(timeoutId);
+    return originalEnd.apply(this, args);
+  };
+
+  // User-Agent validation for API routes
+  if (req.path.startsWith("/api")) {
+    const userAgent = req.get("user-agent");
+    
+    // Block requests without User-Agent (potential bots/scrapers)
+    if (!userAgent) {
+      console.warn(
+        `[${requestId}] ⚠️  Missing User-Agent header for ${req.method} ${req.path} from IP: ${clientIp}`
+      );
+      return res.status(400).json({
+        error: "Bad Request",
+        message: "User-Agent header is required",
+      });
+    }
+
+    // Block suspicious User-Agent patterns
+    const suspiciousUserAgents = [
+      /^$/, // Empty user agent
+      /curl/i, // Direct curl requests (unless explicitly allowed)
+      /wget/i, // wget requests
+      /python-requests/i, // Python requests without proper identification
+      /^Mozilla\/4\.0$/, // Generic old browser
+    ];
+
+    // Allow curl/wget for specific paths (like health checks)
+    const isAllowedPath = req.path === "/api/health" || req.path === "/api/status";
+    
+    if (!isAllowedPath) {
+      const isSuspicious = suspiciousUserAgents.some((pattern) =>
+        pattern.test(userAgent)
+      );
+      if (isSuspicious) {
+        console.warn(
+          `[${requestId}] ⚠️  Suspicious User-Agent detected: ${userAgent} for ${req.method} ${req.path}`
+        );
+        return res.status(403).json({
+          error: "Forbidden",
+          message: "Invalid User-Agent",
+        });
+      }
+    }
+
+    // Validate User-Agent length (prevent extremely long user agents)
+    const maxUserAgentLength = 500;
+    if (userAgent.length > maxUserAgentLength) {
+      console.warn(
+        `[${requestId}] ⚠️  User-Agent too long: ${userAgent.length} characters`
+      );
+      return res.status(400).json({
+        error: "Bad Request",
+        message: "User-Agent header exceeds maximum length",
+      });
+    }
+  }
+
   // Query parameter validation and sanitization for API routes
   if (req.path.startsWith("/api")) {
     // Validate query parameter length
