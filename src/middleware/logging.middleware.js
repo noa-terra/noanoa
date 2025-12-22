@@ -1118,6 +1118,168 @@ function loggingMiddleware(req, res, next) {
     }
   }
 
+  // Request API quota management
+  if (req.path.startsWith("/api")) {
+    // In-memory quota store (in production, use Redis or database)
+    if (!requestMetrics.apiQuotas) {
+      requestMetrics.apiQuotas = new Map();
+    }
+    
+    const apiKey = req.apiKey || req.get("x-api-key") || req.get("api-key");
+    const userId = req.user?.id || req.jwt?.payload?.sub || clientIp;
+    const quotaKey = apiKey || userId;
+    
+    if (quotaKey) {
+      const quota = requestMetrics.apiQuotas.get(quotaKey) || {
+        limit: 10000, // Default: 10000 requests per month
+        used: 0,
+        resetDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
+        windowStart: Date.now(),
+      };
+      
+      const now = Date.now();
+      
+      // Check if quota window has reset
+      if (now >= quota.resetDate.getTime()) {
+        quota.used = 0;
+        quota.windowStart = now;
+        quota.resetDate = new Date(now + 30 * 24 * 60 * 60 * 1000);
+        console.log(
+          `[${requestId}] 🔄 API quota reset for key: ${quotaKey.substring(0, 10)}...`
+        );
+      }
+      
+      // Check if quota exceeded
+      if (quota.used >= quota.limit) {
+        const resetIn = Math.ceil((quota.resetDate.getTime() - now) / 1000);
+        console.warn(
+          `[${requestId}] ⚠️  API quota exceeded for key: ${quotaKey.substring(0, 10)}... (${quota.used}/${quota.limit})`
+        );
+        res.setHeader("X-RateLimit-Limit", quota.limit.toString());
+        res.setHeader("X-RateLimit-Remaining", "0");
+        res.setHeader("X-RateLimit-Reset", quota.resetDate.getTime().toString());
+        return res.status(429).json({
+          error: "Too Many Requests",
+          message: "API quota exceeded",
+          quotaLimit: quota.limit,
+          quotaUsed: quota.used,
+          resetIn: resetIn,
+        });
+      }
+      
+      // Increment quota usage
+      quota.used++;
+      requestMetrics.apiQuotas.set(quotaKey, quota);
+      
+      // Attach quota info to response headers
+      res.setHeader("X-RateLimit-Limit", quota.limit.toString());
+      res.setHeader("X-RateLimit-Remaining", (quota.limit - quota.used).toString());
+      res.setHeader("X-RateLimit-Reset", quota.resetDate.getTime().toString());
+      
+      // Log quota usage
+      if (quota.used % 1000 === 0) {
+        console.log(
+          `[${requestId}] 📊 API quota usage: ${quota.used}/${quota.limit} for key: ${quotaKey.substring(0, 10)}...`
+        );
+      }
+      
+      // Attach quota info to request
+      req.apiQuota = {
+        limit: quota.limit,
+        used: quota.used,
+        remaining: quota.limit - quota.used,
+        resetDate: quota.resetDate,
+      };
+    }
+  }
+
+  // Request cost tracking
+  if (req.path.startsWith("/api")) {
+    // In-memory cost store (in production, use database)
+    if (!requestMetrics.requestCosts) {
+      requestMetrics.requestCosts = new Map();
+    }
+    
+    const apiKey = req.apiKey || req.get("x-api-key") || req.get("api-key");
+    const userId = req.user?.id || req.jwt?.payload?.sub || clientIp;
+    const costKey = apiKey || userId;
+    
+    // Define cost per request type (in production, use config or database)
+    const costPerRequest = {
+      GET: 0.001, // $0.001 per GET request
+      POST: 0.01, // $0.01 per POST request
+      PUT: 0.01, // $0.01 per PUT request
+      PATCH: 0.005, // $0.005 per PATCH request
+      DELETE: 0.005, // $0.005 per DELETE request
+    };
+    
+    const baseCost = costPerRequest[req.method] || 0.001;
+    
+    // Calculate additional costs based on request size
+    const requestSize = req.get("content-length") ? parseInt(req.get("content-length"), 10) : 0;
+    const sizeCost = requestSize > 0 ? (requestSize / 1024 / 1024) * 0.01 : 0; // $0.01 per MB
+    
+    // Calculate total cost
+    const requestCost = baseCost + sizeCost;
+    
+    if (costKey) {
+      const costData = requestMetrics.requestCosts.get(costKey) || {
+        totalCost: 0,
+        requestCount: 0,
+        monthlyCost: 0,
+        monthlyRequestCount: 0,
+        monthStart: new Date().getMonth(),
+        yearStart: new Date().getFullYear(),
+      };
+      
+      const now = new Date();
+      const currentMonth = now.getMonth();
+      const currentYear = now.getFullYear();
+      
+      // Reset monthly costs if new month
+      if (currentMonth !== costData.monthStart || currentYear !== costData.yearStart) {
+        costData.monthlyCost = 0;
+        costData.monthlyRequestCount = 0;
+        costData.monthStart = currentMonth;
+        costData.yearStart = currentYear;
+        console.log(
+          `[${requestId}] 🔄 Monthly cost reset for key: ${costKey.substring(0, 10)}...`
+        );
+      }
+      
+      // Update cost data
+      costData.totalCost += requestCost;
+      costData.requestCount++;
+      costData.monthlyCost += requestCost;
+      costData.monthlyRequestCount++;
+      
+      requestMetrics.requestCosts.set(costKey, costData);
+      
+      // Attach cost info to response headers
+      res.setHeader("X-Request-Cost", requestCost.toFixed(4));
+      res.setHeader("X-Total-Cost", costData.totalCost.toFixed(2));
+      res.setHeader("X-Monthly-Cost", costData.monthlyCost.toFixed(2));
+      res.setHeader("X-Monthly-Requests", costData.monthlyRequestCount.toString());
+      
+      // Log expensive requests
+      if (requestCost > 0.1) {
+        console.log(
+          `[${requestId}] 💰 Expensive request: $${requestCost.toFixed(4)} for ${req.method} ${req.path}`
+        );
+      }
+      
+      // Attach cost info to request
+      req.requestCost = {
+        baseCost: baseCost,
+        sizeCost: sizeCost,
+        totalCost: requestCost,
+        totalCostToDate: costData.totalCost,
+        monthlyCost: costData.monthlyCost,
+        monthlyRequestCount: costData.monthlyRequestCount,
+      };
+    }
+  }
+
   // Request idempotency key handling for state-changing operations
   if (req.path.startsWith("/api") && ["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
     const idempotencyKey = req.get("idempotency-key") || req.get("x-idempotency-key");
