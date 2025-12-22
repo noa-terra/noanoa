@@ -7,16 +7,37 @@ function loggingMiddleware(req, res, next) {
   // Enhanced logging with timestamp and request ID
   console.log(`[${timestamp}] [${requestId}] ${req.method} ${req.path}`);
 
-  // Track response time
+  // Track response time and status codes
   const originalSend = res.send;
+  const originalStatus = res.status;
+  let statusCode = 200;
+  
+  res.status = function(code) {
+    statusCode = code;
+    return originalStatus.call(this, code);
+  };
+  
   res.send = function (body) {
     const duration = Date.now() - startTime;
     res.setHeader("X-Response-Time", `${duration}ms`);
+    
+    // Log response status and duration
+    const logLevel = statusCode >= 500 ? "error" : statusCode >= 400 ? "warn" : "info";
+    console[logLevel](
+      `[${requestId}] ${req.method} ${req.path} - ${statusCode} (${duration}ms)`
+    );
     
     // Log slow requests (over 1 second)
     if (duration > 1000) {
       console.warn(
         `[${requestId}] ⚠️  Slow request detected: ${req.method} ${req.path} took ${duration}ms`
+      );
+    }
+    
+    // Log error responses
+    if (statusCode >= 400) {
+      console.error(
+        `[${requestId}] ❌ Error response: ${statusCode} for ${req.method} ${req.path}`
       );
     }
     
