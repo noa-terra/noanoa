@@ -1,8 +1,44 @@
+// Simple in-memory rate limiting store
+const requestCounts = new Map();
+
 // Logging middleware function
 function loggingMiddleware(req, res, next) {
   const startTime = Date.now();
   const timestamp = new Date().toISOString();
   const requestId = Math.random().toString(36).substring(7);
+  const clientIp = req.ip || req.connection.remoteAddress || "unknown";
+  
+  // Rate limiting: max 100 requests per minute per IP
+  const rateLimitWindow = 60 * 1000; // 1 minute
+  const maxRequests = 100;
+  const now = Date.now();
+  
+  if (!requestCounts.has(clientIp)) {
+    requestCounts.set(clientIp, { count: 0, resetTime: now + rateLimitWindow });
+  }
+  
+  const ipData = requestCounts.get(clientIp);
+  
+  // Reset counter if window expired
+  if (now > ipData.resetTime) {
+    ipData.count = 0;
+    ipData.resetTime = now + rateLimitWindow;
+  }
+  
+  // Check rate limit
+  if (ipData.count >= maxRequests) {
+    console.warn(
+      `[${requestId}] ⚠️  Rate limit exceeded for IP: ${clientIp}`
+    );
+    return res.status(429).json({
+      error: "Too many requests",
+      message: "Rate limit exceeded. Please try again later.",
+      retryAfter: Math.ceil((ipData.resetTime - now) / 1000)
+    });
+  }
+  
+  // Increment request count
+  ipData.count++;
 
   // Request size validation
   const contentLength = req.get("content-length");
