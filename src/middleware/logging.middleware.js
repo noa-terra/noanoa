@@ -254,6 +254,62 @@ function loggingMiddleware(req, res, next) {
   // Attach request ID to response headers for tracking
   res.setHeader("X-Request-ID", requestId);
 
+  // Request correlation tracking
+  const correlationId = req.get("x-correlation-id") || req.get("correlation-id") || requestId;
+  req.correlationId = correlationId;
+  res.setHeader("X-Correlation-ID", correlationId);
+  
+  // Log correlation ID for distributed tracing
+  if (correlationId !== requestId) {
+    console.log(`[${requestId}] Correlation ID: ${correlationId} for ${req.method} ${req.path}`);
+  }
+
+  // Referer validation for API routes
+  if (req.path.startsWith("/api")) {
+    const referer = req.get("referer") || req.get("referrer");
+    
+    if (referer) {
+      // Validate referer format
+      try {
+        const refererUrl = new URL(referer);
+        const allowedHosts = [
+          "localhost",
+          "127.0.0.1",
+          "noam.king",
+          "api.noam.king"
+        ];
+        
+        const refererHost = refererUrl.hostname.toLowerCase();
+        const isAllowedHost = allowedHosts.some(host => 
+          refererHost === host || refererHost.endsWith(`.${host}`)
+        );
+        
+        if (!isAllowedHost) {
+          console.warn(
+            `[${requestId}] ⚠️  Suspicious referer: ${referer} for ${req.method} ${req.path} from IP: ${clientIp}`
+          );
+          // Don't block, just log - some legitimate requests may have external referers
+        } else {
+          console.log(`[${requestId}] Valid referer: ${referer} for ${req.method} ${req.path}`);
+        }
+      } catch (error) {
+        console.warn(
+          `[${requestId}] ⚠️  Invalid referer format: ${referer} for ${req.method} ${req.path}`
+        );
+      }
+    }
+    
+    // Check for missing referer on state-changing operations (potential CSRF)
+    if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
+      if (!referer) {
+        console.warn(
+          `[${requestId}] ⚠️  Missing referer on ${req.method} request: ${req.path} from IP: ${clientIp}`
+        );
+        // Don't block, but log for security monitoring
+      }
+    }
+  }
+
   // API versioning support
   if (req.path.startsWith("/api")) {
     const apiVersion = req.get("api-version") || req.get("x-api-version") || "v1";
