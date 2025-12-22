@@ -278,6 +278,115 @@ function loggingMiddleware(req, res, next) {
   // Attach request ID to response headers for tracking
   res.setHeader("X-Request-ID", requestId);
 
+  // Request idempotency key handling for state-changing operations
+  if (req.path.startsWith("/api") && ["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
+    const idempotencyKey = req.get("idempotency-key") || req.get("x-idempotency-key");
+    
+    if (idempotencyKey) {
+      // Check if this idempotency key was already used
+      if (idempotencyKeys.has(idempotencyKey)) {
+        const previousResponse = idempotencyKeys.get(idempotencyKey);
+        const timeSinceRequest = Date.now() - previousResponse.timestamp;
+        const idempotencyWindow = 24 * 60 * 60 * 1000; // 24 hours
+        
+        // If within window, return cached response
+        if (timeSinceRequest < idempotencyWindow) {
+          console.log(
+            `[${requestId}] 🔄 Idempotent request detected: ${idempotencyKey} for ${req.method} ${req.path}`
+          );
+          
+          // Return cached response
+          res.status(previousResponse.statusCode);
+          Object.entries(previousResponse.headers).forEach(([key, value]) => {
+            res.setHeader(key, value);
+          });
+          res.setHeader("X-Idempotent-Replayed", "true");
+          res.setHeader("X-Original-Request-ID", previousResponse.requestId);
+          
+          return res.json(previousResponse.body);
+        } else {
+          // Window expired, remove old entry
+          idempotencyKeys.delete(idempotencyKey);
+        }
+      }
+      
+      // Store idempotency key for future requests
+      req.idempotencyKey = idempotencyKey;
+      res.setHeader("X-Idempotency-Key", idempotencyKey);
+      
+      // Wrap response to cache it
+      const originalJson = res.json;
+      res.json = function(body) {
+        // Cache the response
+        idempotencyKeys.set(idempotencyKey, {
+          requestId: requestId,
+          timestamp: Date.now(),
+          statusCode: statusCode,
+          headers: {
+            "Content-Type": res.get("Content-Type") || "application/json",
+          },
+          body: body,
+        });
+        
+        // Clean up old entries (keep last 1000)
+        if (idempotencyKeys.size > 1000) {
+          const oldestKey = Array.from(idempotencyKeys.entries())
+            .sort((a, b) => a[1].timestamp - b[1].timestamp)[0][0];
+          idempotencyKeys.delete(oldestKey);
+        }
+        
+        return originalJson.call(this, body);
+      };
+    }
+  }
+
+  // Request pagination support
+  if (req.path.startsWith("/api") && req.method === "GET") {
+    const page = parseInt(req.query.page || "1", 10);
+    const limit = parseInt(req.query.limit || req.query.per_page || "10", 10);
+    const maxLimit = 100; // Maximum items per page
+    const maxPage = 10000; // Maximum page number
+    
+    // Validate pagination parameters
+    if (page < 1 || page > maxPage) {
+      console.warn(
+        `[${requestId}] ⚠️  Invalid page number: ${page} (valid range: 1-${maxPage})`
+      );
+      return res.status(400).json({
+        error: "Bad Request",
+        message: `Invalid page number. Must be between 1 and ${maxPage}`,
+        validRange: { min: 1, max: maxPage },
+      });
+    }
+    
+    if (limit < 1 || limit > maxLimit) {
+      console.warn(
+        `[${requestId}] ⚠️  Invalid limit: ${limit} (valid range: 1-${maxLimit})`
+      );
+      return res.status(400).json({
+        error: "Bad Request",
+        message: `Invalid limit. Must be between 1 and ${maxLimit}`,
+        validRange: { min: 1, max: maxLimit },
+      });
+    }
+    
+    // Attach pagination info to request
+    req.pagination = {
+      page: page,
+      limit: limit,
+      offset: (page - 1) * limit,
+    };
+    
+    // Add pagination headers to response
+    res.setHeader("X-Pagination-Page", page.toString());
+    res.setHeader("X-Pagination-Limit", limit.toString());
+    res.setHeader("X-Pagination-Offset", req.pagination.offset.toString());
+    
+    console.log(
+      `[${requestId}] 📄 Pagination: page=${page}, limit=${limit} for ${req.path}`
+    );
+  }
+
   // Request content negotiation
   if (req.path.startsWith("/api")) {
     const acceptHeader = req.get("accept") || "*/*";
