@@ -67,6 +67,26 @@ function loggingMiddleware(req, res, next) {
     });
   }
 
+  // Path validation - block suspicious paths
+  const suspiciousPatterns = [
+    /\.\./,           // Path traversal attempts
+    /\/etc\/passwd/,  // Common file access attempts
+    /\/proc\//,       // System file access
+    /<script/i,       // XSS attempts in path
+    /eval\(/i,        // Code injection attempts
+  ];
+  
+  const isSuspicious = suspiciousPatterns.some(pattern => pattern.test(req.path));
+  if (isSuspicious) {
+    console.error(
+      `[${requestId}] 🚨 Suspicious path detected: ${req.path} from IP: ${clientIp}`
+    );
+    return res.status(403).json({
+      error: "Forbidden",
+      message: "Invalid request path"
+    });
+  }
+
   // Enhanced logging with timestamp and request ID
   console.log(`[${timestamp}] [${requestId}] ${req.method} ${req.path}`);
 
