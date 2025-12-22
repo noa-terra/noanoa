@@ -7,50 +7,48 @@ function loggingMiddleware(req, res, next) {
   const timestamp = new Date().toISOString();
   const requestId = Math.random().toString(36).substring(7);
   const clientIp = req.ip || req.connection.remoteAddress || "unknown";
-  
+
   // Rate limiting: max 100 requests per minute per IP
   const rateLimitWindow = 60 * 1000; // 1 minute
   const maxRequests = 100;
   const now = Date.now();
-  
+
   if (!requestCounts.has(clientIp)) {
     requestCounts.set(clientIp, { count: 0, resetTime: now + rateLimitWindow });
   }
-  
+
   const ipData = requestCounts.get(clientIp);
-  
+
   // Reset counter if window expired
   if (now > ipData.resetTime) {
     ipData.count = 0;
     ipData.resetTime = now + rateLimitWindow;
   }
-  
+
   // Check rate limit
   if (ipData.count >= maxRequests) {
-    console.warn(
-      `[${requestId}] ⚠️  Rate limit exceeded for IP: ${clientIp}`
-    );
+    console.warn(`[${requestId}] ⚠️  Rate limit exceeded for IP: ${clientIp}`);
     return res.status(429).json({
       error: "Too many requests",
       message: "Rate limit exceeded. Please try again later.",
-      retryAfter: Math.ceil((ipData.resetTime - now) / 1000)
+      retryAfter: Math.ceil((ipData.resetTime - now) / 1000),
     });
   }
-  
+
   // Increment request count
   ipData.count++;
 
   // Request size validation
   const contentLength = req.get("content-length");
   const maxRequestSize = 10 * 1024 * 1024; // 10MB limit
-  
+
   if (contentLength && parseInt(contentLength) > maxRequestSize) {
     console.warn(
       `[${requestId}] ⚠️  Request too large: ${contentLength} bytes (max: ${maxRequestSize} bytes)`
     );
-    return res.status(413).json({ 
+    return res.status(413).json({
       error: "Request entity too large",
-      maxSize: `${maxRequestSize / 1024 / 1024}MB`
+      maxSize: `${maxRequestSize / 1024 / 1024}MB`,
     });
   }
 
@@ -63,27 +61,29 @@ function loggingMiddleware(req, res, next) {
     return res.status(405).json({
       error: "Method not allowed",
       message: `HTTP method ${req.method} is not supported`,
-      allowedMethods: allowedMethods
+      allowedMethods: allowedMethods,
     });
   }
 
   // Path validation - block suspicious paths
   const suspiciousPatterns = [
-    /\.\./,           // Path traversal attempts
-    /\/etc\/passwd/,  // Common file access attempts
-    /\/proc\//,       // System file access
-    /<script/i,       // XSS attempts in path
-    /eval\(/i,        // Code injection attempts
+    /\.\./, // Path traversal attempts
+    /\/etc\/passwd/, // Common file access attempts
+    /\/proc\//, // System file access
+    /<script/i, // XSS attempts in path
+    /eval\(/i, // Code injection attempts
   ];
-  
-  const isSuspicious = suspiciousPatterns.some(pattern => pattern.test(req.path));
+
+  const isSuspicious = suspiciousPatterns.some((pattern) =>
+    pattern.test(req.path)
+  );
   if (isSuspicious) {
     console.error(
       `[${requestId}] 🚨 Suspicious path detected: ${req.path} from IP: ${clientIp}`
     );
     return res.status(403).json({
       error: "Forbidden",
-      message: "Invalid request path"
+      message: "Invalid request path",
     });
   }
 
@@ -94,36 +94,37 @@ function loggingMiddleware(req, res, next) {
   const originalSend = res.send;
   const originalStatus = res.status;
   let statusCode = 200;
-  
-  res.status = function(code) {
+
+  res.status = function (code) {
     statusCode = code;
     return originalStatus.call(this, code);
   };
-  
+
   res.send = function (body) {
     const duration = Date.now() - startTime;
     res.setHeader("X-Response-Time", `${duration}ms`);
-    
+
     // Log response status and duration
-    const logLevel = statusCode >= 500 ? "error" : statusCode >= 400 ? "warn" : "info";
+    const logLevel =
+      statusCode >= 500 ? "error" : statusCode >= 400 ? "warn" : "info";
     console[logLevel](
       `[${requestId}] ${req.method} ${req.path} - ${statusCode} (${duration}ms)`
     );
-    
+
     // Log slow requests (over 1 second)
     if (duration > 1000) {
       console.warn(
         `[${requestId}] ⚠️  Slow request detected: ${req.method} ${req.path} took ${duration}ms`
       );
     }
-    
+
     // Log error responses
     if (statusCode >= 400) {
       console.error(
         `[${requestId}] ❌ Error response: ${statusCode} for ${req.method} ${req.path}`
       );
     }
-    
+
     return originalSend.call(this, body);
   };
 
@@ -183,6 +184,99 @@ function loggingMiddleware(req, res, next) {
   // Attach request ID to response headers for tracking
   res.setHeader("X-Request-ID", requestId);
 
+  // Add security headers for all responses
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader(
+    "Strict-Transport-Security",
+    "max-age=31536000; includeSubDomains"
+  );
+
+  // Remove X-Powered-By header (security best practice)
+  res.removeHeader("X-Powered-By");
+
+  // Request body sanitization for API routes
+  if (req.path.startsWith("/api") && req.body && typeof req.body === "object") {
+    const sanitizeValue = (value, depth = 0) => {
+      const maxDepth = 10;
+      if (depth > maxDepth) {
+        console.warn(
+          `[${requestId}] ⚠️  Object depth exceeded: ${depth} (max: ${maxDepth})`
+        );
+        return {};
+      }
+
+      if (typeof value === "string") {
+        // Remove null bytes and control characters
+        let sanitized = value
+          .replace(/\0/g, "")
+          .replace(/[\x00-\x1F\x7F]/g, "");
+
+        // Limit string length to prevent DoS
+        const maxStringLength = 10000;
+        if (sanitized.length > maxStringLength) {
+          console.warn(
+            `[${requestId}] ⚠️  String value truncated: ${sanitized.length} chars (max: ${maxStringLength})`
+          );
+          sanitized = sanitized.substring(0, maxStringLength);
+        }
+
+        return sanitized;
+      } else if (Array.isArray(value)) {
+        // Limit array size
+        const maxArrayLength = 1000;
+        if (value.length > maxArrayLength) {
+          console.warn(
+            `[${requestId}] ⚠️  Array truncated: ${value.length} items (max: ${maxArrayLength})`
+          );
+          return value
+            .slice(0, maxArrayLength)
+            .map((item) => sanitizeValue(item, depth + 1));
+        }
+        return value.map((item) => sanitizeValue(item, depth + 1));
+      } else if (value && typeof value === "object") {
+        // Limit object keys
+        const maxKeys = 100;
+        const sanitized = {};
+        const keys = Object.keys(value);
+        const keysToProcess = keys.slice(0, maxKeys);
+
+        if (keys.length > maxKeys) {
+          console.warn(
+            `[${requestId}] ⚠️  Object keys truncated: ${keys.length} keys (max: ${maxKeys})`
+          );
+        }
+
+        for (const key of keysToProcess) {
+          // Sanitize key name
+          const sanitizedKey = key.replace(/[^a-zA-Z0-9_-]/g, "");
+          if (sanitizedKey) {
+            sanitized[sanitizedKey] = sanitizeValue(value[key], depth + 1);
+          }
+        }
+
+        return sanitized;
+      }
+      return value;
+    };
+
+    // Sanitize request body
+    try {
+      req.body = sanitizeValue(req.body);
+    } catch (error) {
+      console.error(
+        `[${requestId}] ❌ Error sanitizing request body:`,
+        error.message
+      );
+      return res.status(400).json({
+        error: "Bad Request",
+        message: "Invalid request body format",
+      });
+    }
+  }
+
   // Request timeout handling
   const requestTimeout = 30000; // 30 seconds
   const timeoutId = setTimeout(() => {
@@ -208,7 +302,7 @@ function loggingMiddleware(req, res, next) {
   // User-Agent validation for API routes
   if (req.path.startsWith("/api")) {
     const userAgent = req.get("user-agent");
-    
+
     // Block requests without User-Agent (potential bots/scrapers)
     if (!userAgent) {
       console.warn(
@@ -230,8 +324,9 @@ function loggingMiddleware(req, res, next) {
     ];
 
     // Allow curl/wget for specific paths (like health checks)
-    const isAllowedPath = req.path === "/api/health" || req.path === "/api/status";
-    
+    const isAllowedPath =
+      req.path === "/api/health" || req.path === "/api/status";
+
     if (!isAllowedPath) {
       const isSuspicious = suspiciousUserAgents.some((pattern) =>
         pattern.test(userAgent)
@@ -303,7 +398,10 @@ function loggingMiddleware(req, res, next) {
       );
       if (isSuspicious) {
         console.error(
-          `[${requestId}] 🚨 Suspicious query parameter detected: ${key}=${paramValue.substring(0, 50)}...`
+          `[${requestId}] 🚨 Suspicious query parameter detected: ${key}=${paramValue.substring(
+            0,
+            50
+          )}...`
         );
         return res.status(400).json({
           error: "Bad Request",
@@ -327,7 +425,9 @@ function loggingMiddleware(req, res, next) {
     const maxQueryParams = 20;
     if (Object.keys(req.query).length > maxQueryParams) {
       console.warn(
-        `[${requestId}] ⚠️  Too many query parameters: ${Object.keys(req.query).length} (max: ${maxQueryParams})`
+        `[${requestId}] ⚠️  Too many query parameters: ${
+          Object.keys(req.query).length
+        } (max: ${maxQueryParams})`
       );
       return res.status(400).json({
         error: "Bad Request",
@@ -350,7 +450,7 @@ function loggingMiddleware(req, res, next) {
           message: "Content-Type header is required for this request",
         });
       }
-      
+
       // Validate Content-Type format
       const validContentTypes = [
         "application/json",
@@ -360,22 +460,28 @@ function loggingMiddleware(req, res, next) {
       const isValidContentType = validContentTypes.some((type) =>
         contentType.includes(type)
       );
-      
+
       if (!isValidContentType) {
         console.warn(
           `[${requestId}] ⚠️  Invalid Content-Type: ${contentType} for ${req.method} ${req.path}`
         );
         return res.status(400).json({
           error: "Bad Request",
-          message: `Invalid Content-Type. Supported types: ${validContentTypes.join(", ")}`,
+          message: `Invalid Content-Type. Supported types: ${validContentTypes.join(
+            ", "
+          )}`,
         });
       }
     }
-    
+
     // Validate Accept header for GET requests
     if (req.method === "GET") {
       const accept = req.get("accept");
-      if (accept && !accept.includes("application/json") && !accept.includes("*/*")) {
+      if (
+        accept &&
+        !accept.includes("application/json") &&
+        !accept.includes("*/*")
+      ) {
         console.warn(
           `[${requestId}] ⚠️  Unsupported Accept header: ${accept} for ${req.path}`
         );
@@ -390,17 +496,23 @@ function loggingMiddleware(req, res, next) {
     const allowedOrigins = [
       "http://localhost:3000",
       "http://localhost:4000",
-      "https://noam.king:4000"
+      "https://noam.king:4000",
     ];
-    
+
     if (origin && allowedOrigins.includes(origin)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
     }
-    
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    res.setHeader(
+      "Access-Control-Allow-Methods",
+      "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    );
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization"
+    );
     res.setHeader("Access-Control-Max-Age", "86400"); // 24 hours
-    
+
     // Handle preflight OPTIONS requests
     if (req.method === "OPTIONS") {
       return res.status(200).end();
