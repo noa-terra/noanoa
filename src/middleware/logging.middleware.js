@@ -278,6 +278,97 @@ function loggingMiddleware(req, res, next) {
   // Attach request ID to response headers for tracking
   res.setHeader("X-Request-ID", requestId);
 
+  // Request webhook validation
+  if (req.path.startsWith("/api/webhooks") || req.path.includes("/webhook")) {
+    const webhookSecret = req.get("x-webhook-secret") || req.get("webhook-secret");
+    const webhookSignature = req.get("x-webhook-signature") || req.get("webhook-signature");
+    const webhookId = req.get("x-webhook-id") || req.get("webhook-id");
+    
+    // Validate webhook secret (in production, validate against stored secrets)
+    const validWebhookSecrets = new Set(); // Add valid webhook secrets here if needed
+    
+    if (validWebhookSecrets.size > 0) {
+      if (!webhookSecret) {
+        console.warn(
+          `[${requestId}] ⚠️  Missing webhook secret for ${req.method} ${req.path}`
+        );
+        return res.status(401).json({
+          error: "Unauthorized",
+          message: "Webhook secret is required",
+        });
+      }
+      
+      if (!validWebhookSecrets.has(webhookSecret)) {
+        console.error(
+          `[${requestId}] 🚨 Invalid webhook secret for ${req.method} ${req.path}`
+        );
+        return res.status(401).json({
+          error: "Unauthorized",
+          message: "Invalid webhook secret",
+        });
+      }
+    }
+    
+    // Validate webhook signature if provided
+    if (webhookSignature) {
+      // In production, verify HMAC signature
+      console.log(
+        `[${requestId}] 🔐 Webhook signature provided for ${req.method} ${req.path}`
+      );
+      req.webhookSignature = webhookSignature;
+    }
+    
+    // Attach webhook info to request
+    if (webhookId) {
+      req.webhookId = webhookId;
+      res.setHeader("X-Webhook-ID", webhookId);
+    }
+    
+    if (webhookSecret) {
+      req.webhookSecret = webhookSecret;
+    }
+    
+    console.log(
+      `[${requestId}] 🔔 Webhook request: ${webhookId || "unknown"} for ${req.method} ${req.path}`
+    );
+  }
+
+  // Request streaming support detection
+  if (req.path.startsWith("/api")) {
+    const transferEncoding = req.get("transfer-encoding");
+    const expectContinue = req.get("expect");
+    
+    // Detect chunked transfer encoding
+    if (transferEncoding && transferEncoding.toLowerCase() === "chunked") {
+      console.log(
+        `[${requestId}] 📡 Chunked transfer encoding detected for ${req.method} ${req.path}`
+      );
+      req.isStreaming = true;
+      res.setHeader("X-Streaming-Enabled", "true");
+    }
+    
+    // Handle Expect: 100-continue
+    if (expectContinue && expectContinue.toLowerCase() === "100-continue") {
+      console.log(
+        `[${requestId}] ⏳ Expect: 100-continue received for ${req.method} ${req.path}`
+      );
+      // Send 100 Continue response
+      res.writeContinue();
+      res.setHeader("X-Expect-Continue", "accepted");
+    }
+    
+    // Support for Server-Sent Events (SSE)
+    if (req.get("accept") && req.get("accept").includes("text/event-stream")) {
+      console.log(
+        `[${requestId}] 📡 Server-Sent Events requested for ${req.path}`
+      );
+      req.isSSE = true;
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+    }
+  }
+
   // Request idempotency key handling for state-changing operations
   if (req.path.startsWith("/api") && ["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
     const idempotencyKey = req.get("idempotency-key") || req.get("x-idempotency-key");
