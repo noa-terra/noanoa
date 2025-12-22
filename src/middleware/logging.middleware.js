@@ -1,12 +1,59 @@
 // Simple in-memory rate limiting store
 const requestCounts = new Map();
 
+// IP whitelist and blacklist (in production, these should be in a database or config)
+const ipWhitelist = new Set(); // Add trusted IPs here if needed
+const ipBlacklist = new Set(); // Add blocked IPs here
+
+// Request metrics tracking
+const requestMetrics = {
+  totalRequests: 0,
+  requestsByMethod: new Map(),
+  requestsByPath: new Map(),
+  requestsByStatus: new Map(),
+  errorsByType: new Map(),
+};
+
 // Logging middleware function
 function loggingMiddleware(req, res, next) {
   const startTime = Date.now();
   const timestamp = new Date().toISOString();
   const requestId = Math.random().toString(36).substring(7);
   const clientIp = req.ip || req.connection.remoteAddress || "unknown";
+
+  // IP whitelist/blacklist check
+  if (ipBlacklist.has(clientIp)) {
+    console.error(
+      `[${requestId}] 🚫 Blocked IP attempt: ${clientIp} for ${req.method} ${req.path}`
+    );
+    return res.status(403).json({
+      error: "Forbidden",
+      message: "Access denied",
+    });
+  }
+
+  // If whitelist is populated, only allow whitelisted IPs
+  if (ipWhitelist.size > 0 && !ipWhitelist.has(clientIp)) {
+    console.warn(
+      `[${requestId}] ⚠️  Non-whitelisted IP attempt: ${clientIp} for ${req.method} ${req.path}`
+    );
+    return res.status(403).json({
+      error: "Forbidden",
+      message: "IP address not authorized",
+    });
+  }
+
+  // Update request metrics
+  requestMetrics.totalRequests++;
+  
+  // Track requests by method
+  const methodCount = requestMetrics.requestsByMethod.get(req.method) || 0;
+  requestMetrics.requestsByMethod.set(req.method, methodCount + 1);
+  
+  // Track requests by path (normalize to prevent path parameter explosion)
+  const normalizedPath = req.path.split("?")[0].replace(/\/\d+/g, "/:id");
+  const pathCount = requestMetrics.requestsByPath.get(normalizedPath) || 0;
+  requestMetrics.requestsByPath.set(normalizedPath, pathCount + 1);
 
   // Rate limiting: max 100 requests per minute per IP
   const rateLimitWindow = 60 * 1000; // 1 minute
@@ -123,6 +170,29 @@ function loggingMiddleware(req, res, next) {
       console.error(
         `[${requestId}] ❌ Error response: ${statusCode} for ${req.method} ${req.path}`
       );
+      
+      // Track errors by status code
+      const statusCount = requestMetrics.requestsByStatus.get(statusCode) || 0;
+      requestMetrics.requestsByStatus.set(statusCode, statusCount + 1);
+      
+      // Track error types
+      let errorType = "client_error";
+      if (statusCode >= 500) {
+        errorType = "server_error";
+      } else if (statusCode === 401 || statusCode === 403) {
+        errorType = "authentication_error";
+      } else if (statusCode === 404) {
+        errorType = "not_found";
+      } else if (statusCode === 429) {
+        errorType = "rate_limit_error";
+      }
+      
+      const errorCount = requestMetrics.errorsByType.get(errorType) || 0;
+      requestMetrics.errorsByType.set(errorType, errorCount + 1);
+    } else {
+      // Track successful requests by status
+      const statusCount = requestMetrics.requestsByStatus.get(statusCode) || 0;
+      requestMetrics.requestsByStatus.set(statusCode, statusCount + 1);
     }
 
     return originalSend.call(this, body);
