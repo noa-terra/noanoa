@@ -254,6 +254,124 @@ function loggingMiddleware(req, res, next) {
   // Attach request ID to response headers for tracking
   res.setHeader("X-Request-ID", requestId);
 
+  // API endpoint deprecation warnings
+  const deprecatedEndpoints = new Map([
+    ["/api/v1/products", "2024-12-31"], // Endpoint deprecated, use /api/v2/products
+    ["/api/v1/users", "2024-12-31"], // Endpoint deprecated, use /api/v2/users
+  ]);
+  
+  if (req.path.startsWith("/api")) {
+    for (const [deprecatedPath, deprecationDate] of deprecatedEndpoints.entries()) {
+      if (req.path.startsWith(deprecatedPath)) {
+        const deprecationDateObj = new Date(deprecationDate);
+        const now = new Date();
+        
+        if (now < deprecationDateObj) {
+          // Before deprecation date - warn
+          res.setHeader("X-API-Deprecated", "true");
+          res.setHeader("X-API-Deprecation-Date", deprecationDate);
+          res.setHeader("X-API-Sunset-Date", deprecationDate);
+          console.warn(
+            `[${requestId}] ⚠️  Deprecated endpoint accessed: ${req.path} (deprecated on ${deprecationDate})`
+          );
+        } else {
+          // After deprecation date - return error
+          console.error(
+            `[${requestId}] 🚫 Deprecated endpoint accessed after sunset: ${req.path}`
+          );
+          return res.status(410).json({
+            error: "Gone",
+            message: `This endpoint has been deprecated and is no longer available. Deprecated on: ${deprecationDate}`,
+            deprecatedDate: deprecationDate,
+            requestId: requestId,
+          });
+        }
+      }
+    }
+  }
+
+  // Request validation schemas for API routes
+  if (req.path.startsWith("/api") && ["POST", "PUT", "PATCH"].includes(req.method)) {
+    const validationSchemas = {
+      "/api/products": {
+        required: ["name", "price"],
+        optional: ["description", "category"],
+        types: {
+          name: "string",
+          price: "number",
+          description: "string",
+          category: "string",
+        },
+      },
+      "/api/users": {
+        required: ["email"],
+        optional: ["name", "role"],
+        types: {
+          email: "string",
+          name: "string",
+          role: "string",
+        },
+      },
+    };
+    
+    // Find matching schema
+    let matchingSchema = null;
+    for (const [path, schema] of Object.entries(validationSchemas)) {
+      if (req.path.startsWith(path)) {
+        matchingSchema = schema;
+        break;
+      }
+    }
+    
+    // Validate request body against schema
+    if (matchingSchema && req.body && typeof req.body === "object") {
+      const missingFields = matchingSchema.required.filter(
+        (field) => !(field in req.body) || req.body[field] === null || req.body[field] === undefined
+      );
+      
+      if (missingFields.length > 0) {
+        console.warn(
+          `[${requestId}] ⚠️  Missing required fields: ${missingFields.join(", ")} for ${req.method} ${req.path}`
+        );
+        return res.status(400).json({
+          error: "Bad Request",
+          message: `Missing required fields: ${missingFields.join(", ")}`,
+          requiredFields: matchingSchema.required,
+          missingFields: missingFields,
+        });
+      }
+      
+      // Validate field types
+      const typeErrors = [];
+      for (const [field, expectedType] of Object.entries(matchingSchema.types)) {
+        if (field in req.body && req.body[field] !== null && req.body[field] !== undefined) {
+          const actualType = typeof req.body[field];
+          if (actualType !== expectedType) {
+            typeErrors.push({
+              field: field,
+              expected: expectedType,
+              actual: actualType,
+            });
+          }
+        }
+      }
+      
+      if (typeErrors.length > 0) {
+        console.warn(
+          `[${requestId}] ⚠️  Type validation errors for ${req.method} ${req.path}:`,
+          typeErrors
+        );
+        return res.status(400).json({
+          error: "Bad Request",
+          message: "Invalid field types",
+          typeErrors: typeErrors,
+        });
+      }
+      
+      console.log(`[${requestId}] ✅ Request validation passed for ${req.method} ${req.path}`);
+    }
+  }
+
   // Request context enrichment
   req.context = {
     requestId: requestId,
