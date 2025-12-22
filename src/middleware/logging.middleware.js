@@ -1280,6 +1280,165 @@ function loggingMiddleware(req, res, next) {
     }
   }
 
+  // Request performance profiling
+  if (req.path.startsWith("/api")) {
+    // Initialize performance profile
+    req.performanceProfile = {
+      startTime: process.hrtime.bigint(),
+      phases: {},
+      memoryBefore: process.memoryUsage(),
+      cpuBefore: process.cpuUsage(),
+    };
+    
+    // Track middleware processing time
+    const middlewareStartTime = process.hrtime.bigint();
+    req.performanceProfile.phases.middleware = {
+      start: middlewareStartTime,
+    };
+    
+    // Track authentication phase
+    if (req.get("authorization") || req.apiKey) {
+      req.performanceProfile.phases.authentication = {
+        start: process.hrtime.bigint(),
+      };
+    }
+    
+    // Track validation phase
+    if (["POST", "PUT", "PATCH"].includes(req.method)) {
+      req.performanceProfile.phases.validation = {
+        start: process.hrtime.bigint(),
+      };
+    }
+    
+    // Track database/processing phase (will be set by route handlers)
+    req.performanceProfile.phases.processing = {
+      start: null,
+    };
+    
+    // Track response phase
+    req.performanceProfile.phases.response = {
+      start: null,
+    };
+    
+    // Wrap response methods to track performance
+    const originalJson = res.json;
+    const originalSend = res.send;
+    const originalEnd = res.end;
+    
+    res.json = function(body) {
+      if (!req.performanceProfile.phases.response.start) {
+        req.performanceProfile.phases.response.start = process.hrtime.bigint();
+      }
+      return originalJson.call(this, body);
+    };
+    
+    res.send = function(body) {
+      if (!req.performanceProfile.phases.response.start) {
+        req.performanceProfile.phases.response.start = process.hrtime.bigint();
+      }
+      return originalSend.call(this, body);
+    };
+    
+    res.end = function(...args) {
+      if (!req.performanceProfile.phases.response.start) {
+        req.performanceProfile.phases.response.start = process.hrtime.bigint();
+      }
+      
+      // Calculate performance metrics
+      const endTime = process.hrtime.bigint();
+      const totalTime = Number(endTime - req.performanceProfile.startTime) / 1000000; // Convert to milliseconds
+      
+      // Calculate phase durations
+      const phases = {};
+      for (const [phaseName, phaseData] of Object.entries(req.performanceProfile.phases)) {
+        if (phaseData.start) {
+          const phaseEnd = phaseName === "response" ? endTime : process.hrtime.bigint();
+          phases[phaseName] = Number(phaseEnd - phaseData.start) / 1000000; // Convert to milliseconds
+        }
+      }
+      
+      // Calculate memory delta
+      const memoryAfter = process.memoryUsage();
+      const memoryDelta = {
+        heapUsed: memoryAfter.heapUsed - req.performanceProfile.memoryBefore.heapUsed,
+        heapTotal: memoryAfter.heapTotal - req.performanceProfile.memoryBefore.heapTotal,
+        external: memoryAfter.external - req.performanceProfile.memoryBefore.external,
+        rss: memoryAfter.rss - req.performanceProfile.memoryBefore.rss,
+      };
+      
+      // Calculate CPU delta
+      const cpuAfter = process.cpuUsage(req.performanceProfile.cpuBefore);
+      const cpuDelta = {
+        user: cpuAfter.user / 1000, // Convert to milliseconds
+        system: cpuAfter.system / 1000, // Convert to milliseconds
+      };
+      
+      // Attach performance metrics to response headers
+      res.setHeader("X-Performance-Total-Time", totalTime.toFixed(2));
+      res.setHeader("X-Performance-Memory-Delta", JSON.stringify(memoryDelta));
+      res.setHeader("X-Performance-CPU-Delta", JSON.stringify(cpuDelta));
+      
+      if (phases.middleware) {
+        res.setHeader("X-Performance-Middleware-Time", phases.middleware.toFixed(2));
+      }
+      if (phases.authentication) {
+        res.setHeader("X-Performance-Auth-Time", phases.authentication.toFixed(2));
+      }
+      if (phases.validation) {
+        res.setHeader("X-Performance-Validation-Time", phases.validation.toFixed(2));
+      }
+      if (phases.processing && phases.processing.start !== null) {
+        res.setHeader("X-Performance-Processing-Time", phases.processing.toFixed(2));
+      }
+      if (phases.response) {
+        res.setHeader("X-Performance-Response-Time", phases.response.toFixed(2));
+      }
+      
+      // Log slow requests
+      if (totalTime > 1000) {
+        console.warn(
+          `[${requestId}] ⏱️  Slow request detected: ${totalTime.toFixed(2)}ms for ${req.method} ${req.path}`
+        );
+      }
+      
+      // Log performance breakdown for detailed analysis
+      if (totalTime > 500) {
+        console.log(
+          `[${requestId}] 📊 Performance breakdown for ${req.method} ${req.path}:`,
+          JSON.stringify({
+            total: `${totalTime.toFixed(2)}ms`,
+            phases: phases,
+            memory: memoryDelta,
+            cpu: cpuDelta,
+          }, null, 2)
+        );
+      }
+      
+      // Store performance profile in request metrics
+      if (!requestMetrics.performanceProfiles) {
+        requestMetrics.performanceProfiles = [];
+      }
+      
+      requestMetrics.performanceProfiles.push({
+        requestId: requestId,
+        method: req.method,
+        path: req.path,
+        totalTime: totalTime,
+        phases: phases,
+        memoryDelta: memoryDelta,
+        cpuDelta: cpuDelta,
+        timestamp: Date.now(),
+      });
+      
+      // Keep only last 1000 performance profiles
+      if (requestMetrics.performanceProfiles.length > 1000) {
+        requestMetrics.performanceProfiles.shift();
+      }
+      
+      return originalEnd.apply(this, args);
+    };
+  }
+
   // Request idempotency key handling for state-changing operations
   if (req.path.startsWith("/api") && ["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
     const idempotencyKey = req.get("idempotency-key") || req.get("x-idempotency-key");
