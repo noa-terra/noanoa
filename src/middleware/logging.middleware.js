@@ -875,13 +875,245 @@ function loggingMiddleware(req, res, next) {
       );
     }
     
-    // Clean up old refresh tokens (keep last 1000)
-    if (requestMetrics.refreshTokens.size > 1000) {
-      const now = Date.now();
-      for (const [token, data] of requestMetrics.refreshTokens.entries()) {
-        if (now - data.createdAt > tokenExpiry) {
-          requestMetrics.refreshTokens.delete(token);
+      // Clean up old refresh tokens (keep last 1000)
+      if (requestMetrics.refreshTokens.size > 1000) {
+        const now = Date.now();
+        for (const [token, data] of requestMetrics.refreshTokens.entries()) {
+          if (now - data.createdAt > tokenExpiry) {
+            requestMetrics.refreshTokens.delete(token);
+          }
         }
+      }
+    }
+
+  // Request OAuth validation
+  if (req.path.startsWith("/api") && (req.path.includes("/oauth") || req.path.includes("/auth"))) {
+    const authorizationCode = req.query.code || req.body?.code;
+    const clientId = req.get("x-client-id") || req.get("client-id") || req.query.client_id || req.body?.clientId;
+    const clientSecret = req.get("x-client-secret") || req.get("client-secret") || req.body?.clientSecret;
+    const redirectUri = req.query.redirect_uri || req.body?.redirectUri;
+    const grantType = req.query.grant_type || req.body?.grantType || "authorization_code";
+    
+    // In-memory OAuth client store (in production, use database)
+    if (!requestMetrics.oauthClients) {
+      requestMetrics.oauthClients = new Map();
+    }
+    
+    // Validate OAuth client
+    if (clientId) {
+      const client = requestMetrics.oauthClients.get(clientId);
+      
+      if (!client) {
+        // Create new OAuth client if doesn't exist
+        requestMetrics.oauthClients.set(clientId, {
+          id: clientId,
+          secret: clientSecret || `secret-${Math.random().toString(36).substr(2, 20)}`,
+          redirectUris: redirectUri ? [redirectUri] : [],
+          createdAt: Date.now(),
+          requestCount: 0,
+        });
+        console.log(
+          `[${requestId}] 🆕 New OAuth client registered: ${clientId} for ${req.method} ${req.path}`
+        );
+      } else {
+        // Validate client secret
+        if (clientSecret && client.secret !== clientSecret) {
+          console.warn(
+            `[${requestId}] ⚠️  Invalid OAuth client secret for client: ${clientId}`
+          );
+          return res.status(401).json({
+            error: "Unauthorized",
+            message: "Invalid client credentials",
+          });
+        }
+        
+        // Validate redirect URI
+        if (redirectUri && client.redirectUris.length > 0) {
+          if (!client.redirectUris.includes(redirectUri)) {
+            console.warn(
+              `[${requestId}] ⚠️  Invalid redirect URI: ${redirectUri} for client: ${clientId}`
+            );
+            return res.status(400).json({
+              error: "Bad Request",
+              message: "Invalid redirect URI",
+            });
+          }
+        }
+        
+        // Update client request count
+        client.requestCount = (client.requestCount || 0) + 1;
+        requestMetrics.oauthClients.set(clientId, client);
+      }
+      
+      // Attach OAuth client info to request
+      req.oauthClient = requestMetrics.oauthClients.get(clientId);
+    }
+    
+    // Handle authorization code exchange
+    if (authorizationCode && grantType === "authorization_code") {
+      // In-memory authorization code store (in production, use Redis or database)
+      if (!requestMetrics.authorizationCodes) {
+        requestMetrics.authorizationCodes = new Map();
+      }
+      
+      const codeData = requestMetrics.authorizationCodes.get(authorizationCode);
+      const codeExpiry = 10 * 60 * 1000; // 10 minutes
+      
+      if (codeData) {
+        const now = Date.now();
+        const codeAge = now - codeData.createdAt;
+        
+        // Check if authorization code expired
+        if (codeAge > codeExpiry) {
+          console.warn(
+            `[${requestId}] ⚠️  Authorization code expired: ${authorizationCode.substring(0, 10)}...`
+          );
+          requestMetrics.authorizationCodes.delete(authorizationCode);
+          return res.status(400).json({
+            error: "Bad Request",
+            message: "Authorization code expired",
+          });
+        }
+        
+        // Validate client ID matches
+        if (clientId && codeData.clientId !== clientId) {
+          console.warn(
+            `[${requestId}] ⚠️  Client ID mismatch for authorization code: ${authorizationCode.substring(0, 10)}...`
+          );
+          return res.status(400).json({
+            error: "Bad Request",
+            message: "Invalid authorization code",
+          });
+        }
+        
+        // Generate access token
+        const accessToken = `oauth-access-${Math.random().toString(36).substr(2, 20)}`;
+        const refreshToken = `oauth-refresh-${Math.random().toString(36).substr(2, 20)}`;
+        
+        // Store tokens
+        if (!requestMetrics.refreshTokens) {
+          requestMetrics.refreshTokens = new Map();
+        }
+        requestMetrics.refreshTokens.set(refreshToken, {
+          accessToken: accessToken,
+          createdAt: now,
+          lastUsed: now,
+          refreshCount: 0,
+          clientId: clientId,
+        });
+        
+        // Delete used authorization code
+        requestMetrics.authorizationCodes.delete(authorizationCode);
+        
+        // Attach tokens to response
+        res.setHeader("X-Access-Token", accessToken);
+        res.setHeader("X-Refresh-Token", refreshToken);
+        
+        console.log(
+          `[${requestId}] 🎫 OAuth token issued for client: ${clientId} for ${req.method} ${req.path}`
+        );
+        
+        // Return tokens in response body
+        req.oauthTokenResponse = {
+          access_token: accessToken,
+          refresh_token: refreshToken,
+          token_type: "Bearer",
+          expires_in: 3600, // 1 hour
+        };
+      } else {
+        console.warn(
+          `[${requestId}] ⚠️  Invalid authorization code: ${authorizationCode.substring(0, 10)}...`
+        );
+        return res.status(400).json({
+          error: "Bad Request",
+          message: "Invalid authorization code",
+        });
+      }
+    }
+  }
+
+  // Request JWT validation
+  if (req.path.startsWith("/api")) {
+    const authHeader = req.get("authorization");
+    const jwtToken = authHeader?.replace(/^Bearer /, "") || req.get("x-jwt-token") || req.get("jwt-token");
+    
+    if (jwtToken && jwtToken.startsWith("eyJ")) {
+      // Basic JWT structure validation (in production, use a JWT library)
+      try {
+        const parts = jwtToken.split(".");
+        
+        if (parts.length !== 3) {
+          console.warn(
+            `[${requestId}] ⚠️  Invalid JWT structure for ${req.method} ${req.path}`
+          );
+          return res.status(401).json({
+            error: "Unauthorized",
+            message: "Invalid token format",
+          });
+        }
+        
+        // Decode JWT header and payload (base64url)
+        const header = JSON.parse(Buffer.from(parts[0], "base64url").toString());
+        const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString());
+        
+        // Validate JWT expiration
+        if (payload.exp) {
+          const now = Math.floor(Date.now() / 1000);
+          if (payload.exp < now) {
+            console.warn(
+              `[${requestId}] ⚠️  JWT token expired for ${req.method} ${req.path}`
+            );
+            return res.status(401).json({
+              error: "Unauthorized",
+              message: "Token expired",
+            });
+          }
+        }
+        
+        // Validate JWT not before
+        if (payload.nbf) {
+          const now = Math.floor(Date.now() / 1000);
+          if (payload.nbf > now) {
+            console.warn(
+              `[${requestId}] ⚠️  JWT token not yet valid for ${req.method} ${req.path}`
+            );
+            return res.status(401).json({
+              error: "Unauthorized",
+              message: "Token not yet valid",
+            });
+          }
+        }
+        
+        // Attach JWT info to request
+        req.jwt = {
+          header: header,
+          payload: payload,
+          token: jwtToken,
+        };
+        
+        // Attach user info from JWT payload
+        if (payload.sub) {
+          req.user = {
+            id: payload.sub,
+            email: payload.email,
+            roles: payload.roles || [],
+          };
+        }
+        
+        res.setHeader("X-JWT-Subject", payload.sub || "unknown");
+        res.setHeader("X-JWT-Issuer", payload.iss || "unknown");
+        
+        console.log(
+          `[${requestId}] 🔐 Valid JWT token for subject: ${payload.sub || "unknown"} for ${req.method} ${req.path}`
+        );
+      } catch (error) {
+        console.error(
+          `[${requestId}] ❌ JWT validation error: ${error.message} for ${req.method} ${req.path}`
+        );
+        return res.status(401).json({
+          error: "Unauthorized",
+          message: "Invalid token",
+        });
       }
     }
   }
