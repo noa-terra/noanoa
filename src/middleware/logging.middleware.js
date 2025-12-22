@@ -377,6 +377,42 @@ function loggingMiddleware(req, res, next) {
       offset: (page - 1) * limit,
     };
     
+    // Request filtering and sorting support
+    const filter = req.query.filter || req.query.where;
+    const sort = req.query.sort || req.query.order_by || req.query.orderBy;
+    const sortOrder = req.query.sort_order || req.query.order || "asc";
+    
+    // Validate sort order
+    const validSortOrders = ["asc", "desc", "ASC", "DESC"];
+    if (sort && !validSortOrders.includes(sortOrder.toLowerCase())) {
+      console.warn(
+        `[${requestId}] ⚠️  Invalid sort order: ${sortOrder} (valid: asc, desc)`
+      );
+      return res.status(400).json({
+        error: "Bad Request",
+        message: `Invalid sort order. Must be 'asc' or 'desc'`,
+        validOrders: ["asc", "desc"],
+      });
+    }
+    
+    // Attach filtering and sorting info to request
+    if (filter) {
+      req.filter = filter;
+      console.log(`[${requestId}] 🔍 Filter: ${filter} for ${req.path}`);
+    }
+    
+    if (sort) {
+      req.sort = {
+        field: sort,
+        order: sortOrder.toLowerCase(),
+      };
+      res.setHeader("X-Sort-Field", sort);
+      res.setHeader("X-Sort-Order", sortOrder.toLowerCase());
+      console.log(
+        `[${requestId}] 📊 Sort: ${sort} ${sortOrder.toLowerCase()} for ${req.path}`
+      );
+    }
+    
     // Add pagination headers to response
     res.setHeader("X-Pagination-Page", page.toString());
     res.setHeader("X-Pagination-Limit", limit.toString());
@@ -384,6 +420,41 @@ function loggingMiddleware(req, res, next) {
     
     console.log(
       `[${requestId}] 📄 Pagination: page=${page}, limit=${limit} for ${req.path}`
+    );
+  }
+
+  // Request batch processing validation
+  if (req.path.startsWith("/api") && req.path.includes("/batch")) {
+    const batchSize = Array.isArray(req.body) ? req.body.length : 
+                     req.body?.items ? req.body.items.length : 0;
+    const maxBatchSize = 100;
+    
+    if (batchSize > maxBatchSize) {
+      console.warn(
+        `[${requestId}] ⚠️  Batch size exceeds limit: ${batchSize} (max: ${maxBatchSize})`
+      );
+      return res.status(400).json({
+        error: "Bad Request",
+        message: `Batch size exceeds maximum allowed. Maximum: ${maxBatchSize} items`,
+        batchSize: batchSize,
+        maxBatchSize: maxBatchSize,
+      });
+    }
+    
+    if (batchSize === 0) {
+      console.warn(
+        `[${requestId}] ⚠️  Empty batch request for ${req.method} ${req.path}`
+      );
+      return res.status(400).json({
+        error: "Bad Request",
+        message: "Batch request must contain at least one item",
+      });
+    }
+    
+    req.batchSize = batchSize;
+    res.setHeader("X-Batch-Size", batchSize.toString());
+    console.log(
+      `[${requestId}] 📦 Batch request: ${batchSize} items for ${req.method} ${req.path}`
     );
   }
 
