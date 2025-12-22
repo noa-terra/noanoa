@@ -54,6 +54,19 @@ function loggingMiddleware(req, res, next) {
     });
   }
 
+  // Method validation - only allow specific HTTP methods
+  const allowedMethods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
+  if (!allowedMethods.includes(req.method)) {
+    console.warn(
+      `[${requestId}] ⚠️  Method not allowed: ${req.method} for ${req.path}`
+    );
+    return res.status(405).json({
+      error: "Method not allowed",
+      message: `HTTP method ${req.method} is not supported`,
+      allowedMethods: allowedMethods
+    });
+  }
+
   // Enhanced logging with timestamp and request ID
   console.log(`[${timestamp}] [${requestId}] ${req.method} ${req.path}`);
 
