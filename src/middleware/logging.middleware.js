@@ -369,6 +369,204 @@ function loggingMiddleware(req, res, next) {
     }
   }
 
+  // Request circuit breaker pattern
+  if (req.path.startsWith("/api")) {
+    // Track circuit breaker state per endpoint
+    if (!requestMetrics.circuitBreakers) {
+      requestMetrics.circuitBreakers = new Map();
+    }
+    
+    const endpointKey = `${req.method}:${req.path.split("?")[0]}`;
+    const circuitBreaker = requestMetrics.circuitBreakers.get(endpointKey) || {
+      state: "closed", // closed, open, half-open
+      failureCount: 0,
+      successCount: 0,
+      lastFailureTime: null,
+      openUntil: null,
+    };
+    
+    const failureThreshold = 5; // Open circuit after 5 failures
+    const successThreshold = 2; // Close circuit after 2 successes
+    const openDuration = 60000; // Keep circuit open for 60 seconds
+    
+    // Check if circuit is open
+    if (circuitBreaker.state === "open") {
+      const now = Date.now();
+      if (circuitBreaker.openUntil && now < circuitBreaker.openUntil) {
+        console.warn(
+          `[${requestId}] ⚠️  Circuit breaker OPEN for ${endpointKey} - rejecting request`
+        );
+        res.setHeader("X-Circuit-Breaker-State", "open");
+        res.setHeader("Retry-After", Math.ceil((circuitBreaker.openUntil - now) / 1000).toString());
+        return res.status(503).json({
+          error: "Service Unavailable",
+          message: "Circuit breaker is open. Please try again later.",
+          retryAfter: Math.ceil((circuitBreaker.openUntil - now) / 1000),
+        });
+      } else {
+        // Transition to half-open
+        circuitBreaker.state = "half-open";
+        circuitBreaker.successCount = 0;
+        console.log(
+          `[${requestId}] 🔄 Circuit breaker transitioning to HALF-OPEN for ${endpointKey}`
+        );
+      }
+    }
+    
+    // Store circuit breaker state
+    requestMetrics.circuitBreakers.set(endpointKey, circuitBreaker);
+    req.circuitBreaker = circuitBreaker;
+    res.setHeader("X-Circuit-Breaker-State", circuitBreaker.state);
+    
+    // Wrap response to track failures/successes
+    const originalEnd = res.end;
+    const originalJson = res.json;
+    
+    res.end = function(...args) {
+      const statusCode = res.statusCode;
+      
+      // Track failure (5xx errors)
+      if (statusCode >= 500) {
+        circuitBreaker.failureCount++;
+        circuitBreaker.lastFailureTime = Date.now();
+        
+        if (circuitBreaker.state === "half-open") {
+          // Failed in half-open, open circuit again
+          circuitBreaker.state = "open";
+          circuitBreaker.openUntil = Date.now() + openDuration;
+          console.warn(
+            `[${requestId}] 🚨 Circuit breaker OPENED for ${endpointKey} after failure in half-open state`
+          );
+        } else if (circuitBreaker.failureCount >= failureThreshold) {
+          // Open circuit
+          circuitBreaker.state = "open";
+          circuitBreaker.openUntil = Date.now() + openDuration;
+          console.error(
+            `[${requestId}] 🚨 Circuit breaker OPENED for ${endpointKey} after ${circuitBreaker.failureCount} failures`
+          );
+        }
+      } else {
+        // Track success
+        circuitBreaker.successCount++;
+        
+        if (circuitBreaker.state === "half-open" && circuitBreaker.successCount >= successThreshold) {
+          // Close circuit
+          circuitBreaker.state = "closed";
+          circuitBreaker.failureCount = 0;
+          circuitBreaker.successCount = 0;
+          console.log(
+            `[${requestId}] ✅ Circuit breaker CLOSED for ${endpointKey} after ${circuitBreaker.successCount} successes`
+          );
+        } else if (circuitBreaker.state === "closed") {
+          // Reset failure count on success
+          circuitBreaker.failureCount = 0;
+        }
+      }
+      
+      requestMetrics.circuitBreakers.set(endpointKey, circuitBreaker);
+      return originalEnd.apply(this, args);
+    };
+    
+    res.json = function(body) {
+      const statusCode = res.statusCode;
+      
+      // Track failure (5xx errors)
+      if (statusCode >= 500) {
+        circuitBreaker.failureCount++;
+        circuitBreaker.lastFailureTime = Date.now();
+        
+        if (circuitBreaker.state === "half-open") {
+          circuitBreaker.state = "open";
+          circuitBreaker.openUntil = Date.now() + openDuration;
+          console.warn(
+            `[${requestId}] 🚨 Circuit breaker OPENED for ${endpointKey} after failure in half-open state`
+          );
+        } else if (circuitBreaker.failureCount >= failureThreshold) {
+          circuitBreaker.state = "open";
+          circuitBreaker.openUntil = Date.now() + openDuration;
+          console.error(
+            `[${requestId}] 🚨 Circuit breaker OPENED for ${endpointKey} after ${circuitBreaker.failureCount} failures`
+          );
+        }
+      } else {
+        circuitBreaker.successCount++;
+        
+        if (circuitBreaker.state === "half-open" && circuitBreaker.successCount >= successThreshold) {
+          circuitBreaker.state = "closed";
+          circuitBreaker.failureCount = 0;
+          circuitBreaker.successCount = 0;
+          console.log(
+            `[${requestId}] ✅ Circuit breaker CLOSED for ${endpointKey} after ${circuitBreaker.successCount} successes`
+          );
+        } else if (circuitBreaker.state === "closed") {
+          circuitBreaker.failureCount = 0;
+        }
+      }
+      
+      requestMetrics.circuitBreakers.set(endpointKey, circuitBreaker);
+      return originalJson.apply(this, arguments);
+    };
+  }
+
+  // Request load balancing hints
+  if (req.path.startsWith("/api")) {
+    const loadBalancerId = req.get("x-load-balancer-id") || req.get("load-balancer-id");
+    const serverHint = req.get("x-server-hint") || req.get("server-hint");
+    const stickySession = req.get("x-sticky-session") || req.get("sticky-session");
+    const preferredServer = req.get("x-preferred-server") || req.get("preferred-server");
+    
+    // Attach load balancing info to request
+    if (loadBalancerId) {
+      req.loadBalancerId = loadBalancerId;
+      res.setHeader("X-Load-Balancer-ID", loadBalancerId);
+      console.log(
+        `[${requestId}] ⚖️  Load balancer ID: ${loadBalancerId} for ${req.method} ${req.path}`
+      );
+    }
+    
+    if (serverHint) {
+      req.serverHint = serverHint;
+      res.setHeader("X-Server-Hint", serverHint);
+      console.log(
+        `[${requestId}] 🎯 Server hint: ${serverHint} for ${req.method} ${req.path}`
+      );
+    }
+    
+    if (stickySession) {
+      req.stickySession = stickySession;
+      res.setHeader("X-Sticky-Session", stickySession);
+      console.log(
+        `[${requestId}] 🔗 Sticky session: ${stickySession} for ${req.method} ${req.path}`
+      );
+    }
+    
+    if (preferredServer) {
+      req.preferredServer = preferredServer;
+      res.setHeader("X-Preferred-Server", preferredServer);
+      console.log(
+        `[${requestId}] ⭐ Preferred server: ${preferredServer} for ${req.method} ${req.path}`
+      );
+    }
+    
+    // Add server identification to response
+    const serverId = process.env.SERVER_ID || `server-${Math.random().toString(36).substr(2, 9)}`;
+    res.setHeader("X-Server-ID", serverId);
+    
+    // Add load balancing metrics
+    if (!requestMetrics.loadBalancingStats) {
+      requestMetrics.loadBalancingStats = new Map();
+    }
+    
+    const lbKey = loadBalancerId || "default";
+    const lbStats = requestMetrics.loadBalancingStats.get(lbKey) || {
+      requestCount: 0,
+      lastRequestTime: null,
+    };
+    lbStats.requestCount++;
+    lbStats.lastRequestTime = Date.now();
+    requestMetrics.loadBalancingStats.set(lbKey, lbStats);
+  }
+
   // Request idempotency key handling for state-changing operations
   if (req.path.startsWith("/api") && ["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
     const idempotencyKey = req.get("idempotency-key") || req.get("x-idempotency-key");
