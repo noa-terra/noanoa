@@ -55,6 +55,21 @@ function loggingMiddleware(req, res, next) {
   const pathCount = requestMetrics.requestsByPath.get(normalizedPath) || 0;
   requestMetrics.requestsByPath.set(normalizedPath, pathCount + 1);
 
+  // Request priority handling (needs to be before rate limiting)
+  req.priority = "normal"; // Default priority
+  if (req.path.startsWith("/api")) {
+    const priority = req.get("x-priority") || req.get("priority") || "normal";
+    const validPriorities = ["low", "normal", "high", "critical"];
+    
+    if (validPriorities.includes(priority.toLowerCase())) {
+      req.priority = priority.toLowerCase();
+    } else if (priority !== "normal") {
+      console.warn(
+        `[${requestId}] ⚠️  Invalid priority: ${priority}, defaulting to normal`
+      );
+    }
+  }
+
   // Rate limiting: max 100 requests per minute per IP
   const rateLimitWindow = 60 * 1000; // 1 minute
   const maxRequests = 100;
@@ -72,12 +87,21 @@ function loggingMiddleware(req, res, next) {
     ipData.resetTime = now + rateLimitWindow;
   }
 
-  // Check rate limit
-  if (ipData.count >= maxRequests) {
-    console.warn(`[${requestId}] ⚠️  Rate limit exceeded for IP: ${clientIp}`);
+  // Check rate limit (adjust based on priority if set)
+  let effectiveMaxRequests = maxRequests;
+  if (req.priority === "critical") {
+    effectiveMaxRequests = 200; // Higher limit for critical requests
+  } else if (req.priority === "low") {
+    effectiveMaxRequests = 50; // Lower limit for low priority requests
+  }
+  
+  if (ipData.count >= effectiveMaxRequests) {
+    console.warn(
+      `[${requestId}] ⚠️  Rate limit exceeded for IP: ${clientIp} (priority: ${req.priority || "normal"})`
+    );
     return res.status(429).json({
       error: "Too many requests",
-      message: "Rate limit exceeded. Please try again later.",
+      message: `Rate limit exceeded for ${req.priority || "normal"} priority requests. Please try again later.`,
       retryAfter: Math.ceil((ipData.resetTime - now) / 1000),
     });
   }
@@ -253,6 +277,42 @@ function loggingMiddleware(req, res, next) {
 
   // Attach request ID to response headers for tracking
   res.setHeader("X-Request-ID", requestId);
+
+  // Request feature flags
+  const featureFlags = {
+    enableAdvancedLogging: process.env.ENABLE_ADVANCED_LOGGING === "true",
+    enableRequestValidation: process.env.ENABLE_REQUEST_VALIDATION !== "false",
+    enableRateLimiting: process.env.ENABLE_RATE_LIMITING !== "false",
+    enableAuditLogging: process.env.ENABLE_AUDIT_LOGGING === "true",
+  };
+  
+  // Attach feature flags to request context
+  req.featureFlags = featureFlags;
+
+  // Request priority handling
+  if (req.path.startsWith("/api")) {
+    const priority = req.get("x-priority") || req.get("priority") || "normal";
+    const validPriorities = ["low", "normal", "high", "critical"];
+    
+    if (!validPriorities.includes(priority.toLowerCase())) {
+      console.warn(
+        `[${requestId}] ⚠️  Invalid priority: ${priority}, defaulting to normal`
+      );
+      req.priority = "normal";
+    } else {
+      req.priority = priority.toLowerCase();
+    }
+    
+    // Set priority-based headers
+    res.setHeader("X-Request-Priority", req.priority);
+    
+    // Log priority requests
+    if (req.priority !== "normal") {
+      console.log(
+        `[${requestId}] 📊 Priority request: ${req.priority} for ${req.method} ${req.path}`
+      );
+    }
+  }
 
   // API endpoint deprecation warnings
   const deprecatedEndpoints = new Map([
