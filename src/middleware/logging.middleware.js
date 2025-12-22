@@ -708,6 +708,184 @@ function loggingMiddleware(req, res, next) {
     };
   }
 
+  // Request session management
+  if (req.path.startsWith("/api")) {
+    // In-memory session store (in production, use Redis or database)
+    if (!requestMetrics.sessions) {
+      requestMetrics.sessions = new Map();
+    }
+    
+    const sessionId = req.get("x-session-id") || req.get("session-id") || req.cookies?.sessionId;
+    const sessionToken = req.get("x-session-token") || req.get("session-token");
+    
+    if (sessionId) {
+      let session = requestMetrics.sessions.get(sessionId);
+      const sessionTimeout = 30 * 60 * 1000; // 30 minutes
+      
+      // Validate session
+      if (session) {
+        const now = Date.now();
+        const sessionAge = now - session.lastActivity;
+        
+        // Check if session expired
+        if (sessionAge > sessionTimeout) {
+          console.warn(
+            `[${requestId}] ⚠️  Session expired: ${sessionId} (age: ${Math.round(sessionAge / 1000)}s)`
+          );
+          requestMetrics.sessions.delete(sessionId);
+          session = null;
+        } else {
+          // Update session activity
+          session.lastActivity = now;
+          session.requestCount = (session.requestCount || 0) + 1;
+          requestMetrics.sessions.set(sessionId, session);
+        }
+      }
+      
+      // Validate session token if provided
+      if (session && sessionToken) {
+        if (session.token !== sessionToken) {
+          console.warn(
+            `[${requestId}] ⚠️  Invalid session token for session: ${sessionId}`
+          );
+          return res.status(401).json({
+            error: "Unauthorized",
+            message: "Invalid session token",
+          });
+        }
+      }
+      
+      // Create new session if doesn't exist
+      if (!session && sessionId) {
+        session = {
+          id: sessionId,
+          token: sessionToken || `token-${Math.random().toString(36).substr(2, 9)}`,
+          createdAt: Date.now(),
+          lastActivity: Date.now(),
+          requestCount: 1,
+          ip: clientIp,
+          userAgent: req.get("user-agent") || "",
+        };
+        requestMetrics.sessions.set(sessionId, session);
+        console.log(
+          `[${requestId}] 🆕 New session created: ${sessionId} for ${req.method} ${req.path}`
+        );
+      }
+      
+      // Attach session to request
+      if (session) {
+        req.session = session;
+        res.setHeader("X-Session-ID", session.id);
+        res.setHeader("X-Session-Token", session.token);
+        res.setHeader("X-Session-Age", Math.round((Date.now() - session.createdAt) / 1000).toString());
+      }
+    }
+    
+    // Clean up expired sessions periodically (keep last 1000)
+    if (requestMetrics.sessions.size > 1000) {
+      const now = Date.now();
+      for (const [id, session] of requestMetrics.sessions.entries()) {
+        if (now - session.lastActivity > sessionTimeout) {
+          requestMetrics.sessions.delete(id);
+        }
+      }
+    }
+  }
+
+  // Request token refresh handling
+  if (req.path.startsWith("/api") && req.path.includes("/refresh") || req.path.includes("/token")) {
+    const refreshToken = req.get("x-refresh-token") || req.get("refresh-token") || req.body?.refreshToken;
+    const accessToken = req.get("authorization")?.replace(/^Bearer /, "") || req.get("x-access-token");
+    
+    // In-memory token store (in production, use Redis or database)
+    if (!requestMetrics.refreshTokens) {
+      requestMetrics.refreshTokens = new Map();
+    }
+    
+    if (refreshToken) {
+      const tokenData = requestMetrics.refreshTokens.get(refreshToken);
+      const tokenExpiry = 7 * 24 * 60 * 60 * 1000; // 7 days
+      
+      if (tokenData) {
+        const now = Date.now();
+        const tokenAge = now - tokenData.createdAt;
+        
+        // Check if refresh token expired
+        if (tokenAge > tokenExpiry) {
+          console.warn(
+            `[${requestId}] ⚠️  Refresh token expired: ${refreshToken.substring(0, 10)}...`
+          );
+          requestMetrics.refreshTokens.delete(refreshToken);
+          return res.status(401).json({
+            error: "Unauthorized",
+            message: "Refresh token expired",
+          });
+        }
+        
+        // Generate new access token
+        const newAccessToken = `access-${Math.random().toString(36).substr(2, 20)}`;
+        const newRefreshToken = `refresh-${Math.random().toString(36).substr(2, 20)}`;
+        
+        // Update token data
+        tokenData.lastUsed = now;
+        tokenData.accessToken = newAccessToken;
+        tokenData.refreshCount = (tokenData.refreshCount || 0) + 1;
+        
+        // Store new refresh token
+        requestMetrics.refreshTokens.set(newRefreshToken, tokenData);
+        requestMetrics.refreshTokens.delete(refreshToken);
+        
+        // Attach tokens to response
+        res.setHeader("X-New-Access-Token", newAccessToken);
+        res.setHeader("X-New-Refresh-Token", newRefreshToken);
+        
+        console.log(
+          `[${requestId}] 🔄 Token refreshed for ${req.method} ${req.path}`
+        );
+        
+        // Return new tokens in response body
+        req.tokenRefreshResponse = {
+          accessToken: newAccessToken,
+          refreshToken: newRefreshToken,
+          expiresIn: 3600, // 1 hour
+        };
+      } else {
+        console.warn(
+          `[${requestId}] ⚠️  Invalid refresh token: ${refreshToken.substring(0, 10)}...`
+        );
+        return res.status(401).json({
+          error: "Unauthorized",
+          message: "Invalid refresh token",
+        });
+      }
+    } else if (accessToken && req.path.includes("/token")) {
+      // Store new refresh token for access token
+      const newRefreshToken = `refresh-${Math.random().toString(36).substr(2, 20)}`;
+      requestMetrics.refreshTokens.set(newRefreshToken, {
+        accessToken: accessToken,
+        createdAt: Date.now(),
+        lastUsed: Date.now(),
+        refreshCount: 0,
+        ip: clientIp,
+      });
+      
+      res.setHeader("X-Refresh-Token", newRefreshToken);
+      console.log(
+        `[${requestId}] 🎫 Refresh token issued for ${req.method} ${req.path}`
+      );
+    }
+    
+    // Clean up old refresh tokens (keep last 1000)
+    if (requestMetrics.refreshTokens.size > 1000) {
+      const now = Date.now();
+      for (const [token, data] of requestMetrics.refreshTokens.entries()) {
+        if (now - data.createdAt > tokenExpiry) {
+          requestMetrics.refreshTokens.delete(token);
+        }
+      }
+    }
+  }
+
   // Request idempotency key handling for state-changing operations
   if (req.path.startsWith("/api") && ["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
     const idempotencyKey = req.get("idempotency-key") || req.get("x-idempotency-key");
