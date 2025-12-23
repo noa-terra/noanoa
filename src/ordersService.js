@@ -309,6 +309,167 @@ class OrdersService {
     }
     return grouped;
   }
+
+  // Bulk create orders
+  bulkCreate(ordersData) {
+    if (!Array.isArray(ordersData) || ordersData.length === 0) {
+      throw new ValidationError("Orders data must be a non-empty array");
+    }
+    if (ordersData.length > 100) {
+      throw new ValidationError("Cannot create more than 100 orders at once");
+    }
+
+    const created = [];
+    const errors = [];
+
+    for (let i = 0; i < ordersData.length; i++) {
+      try {
+        const order = this.create(ordersData[i]);
+        created.push(order);
+      } catch (error) {
+        errors.push({
+          index: i,
+          data: ordersData[i],
+          error: error.message,
+        });
+      }
+    }
+
+    return {
+      created,
+      errors,
+      successCount: created.length,
+      errorCount: errors.length,
+    };
+  }
+
+  // Bulk update orders
+  bulkUpdate(updates) {
+    if (!Array.isArray(updates) || updates.length === 0) {
+      throw new ValidationError("Updates must be a non-empty array");
+    }
+    if (updates.length > 100) {
+      throw new ValidationError("Cannot update more than 100 orders at once");
+    }
+
+    const updated = [];
+    const errors = [];
+
+    for (let i = 0; i < updates.length; i++) {
+      const update = updates[i];
+      if (!update.id) {
+        errors.push({
+          index: i,
+          update,
+          error: "Missing required field: id",
+        });
+        continue;
+      }
+
+      try {
+        const order = this.update(update.id, update);
+        updated.push(order);
+      } catch (error) {
+        errors.push({
+          index: i,
+          id: update.id,
+          error: error.message,
+        });
+      }
+    }
+
+    return {
+      updated,
+      errors,
+      successCount: updated.length,
+      errorCount: errors.length,
+    };
+  }
+
+  // Bulk update order statuses
+  bulkUpdateStatus(statusUpdates) {
+    if (!Array.isArray(statusUpdates) || statusUpdates.length === 0) {
+      throw new ValidationError("Status updates must be a non-empty array");
+    }
+    if (statusUpdates.length > 100) {
+      throw new ValidationError("Cannot update more than 100 orders at once");
+    }
+
+    const updated = [];
+    const errors = [];
+
+    for (let i = 0; i < statusUpdates.length; i++) {
+      const statusUpdate = statusUpdates[i];
+      if (!statusUpdate.id) {
+        errors.push({
+          index: i,
+          statusUpdate,
+          error: "Missing required field: id",
+        });
+        continue;
+      }
+
+      if (!statusUpdate.status) {
+        errors.push({
+          index: i,
+          id: statusUpdate.id,
+          error: "Missing required field: status",
+        });
+        continue;
+      }
+
+      try {
+        const order = this.update(statusUpdate.id, { status: statusUpdate.status });
+        updated.push(order);
+      } catch (error) {
+        errors.push({
+          index: i,
+          id: statusUpdate.id,
+          error: error.message,
+        });
+      }
+    }
+
+    return {
+      updated,
+      errors,
+      successCount: updated.length,
+      errorCount: errors.length,
+    };
+  }
+
+  // Bulk delete orders
+  bulkDelete(ids) {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      throw new ValidationError("Ids must be a non-empty array");
+    }
+    if (ids.length > 100) {
+      throw new ValidationError("Cannot delete more than 100 orders at once");
+    }
+
+    const deleted = [];
+    const errors = [];
+
+    for (let i = 0; i < ids.length; i++) {
+      try {
+        const result = this.delete(ids[i]);
+        deleted.push(result.deletedId);
+      } catch (error) {
+        errors.push({
+          index: i,
+          id: ids[i],
+          error: error.message,
+        });
+      }
+    }
+
+    return {
+      deleted,
+      errors,
+      successCount: deleted.length,
+      errorCount: errors.length,
+    };
+  }
 }
 
 module.exports = new OrdersService();
