@@ -201,6 +201,46 @@ class OrdersService {
     }
     return this.orders.filter((order) => order.productId === pid);
   }
+
+  // Get orders by date range
+  getByDateRange(startDate, endDate) {
+    if (!startDate || !endDate) {
+      throw new ValidationError("Both startDate and endDate are required");
+    }
+    
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      throw new ValidationError("Invalid date format");
+    }
+    
+    if (start > end) {
+      throw new ValidationError("Start date cannot be after end date");
+    }
+    
+    return this.orders.filter((order) => {
+      const orderDate = new Date(order.createdAt);
+      return orderDate >= start && orderDate <= end;
+    });
+  }
+
+  // Get orders by total value range
+  getByTotalRange(minTotal = 0, maxTotal = Infinity) {
+    const min = Number(minTotal) || 0;
+    const max = Number(maxTotal) || Infinity;
+    
+    if (min < 0 || max < 0) {
+      throw new ValidationError("Total range values must be non-negative");
+    }
+    if (min > max) {
+      throw new ValidationError("Minimum total cannot be greater than maximum total");
+    }
+    
+    return this.orders.filter(
+      (order) => order.total >= min && order.total <= max
+    );
+  }
 }
 
 module.exports = new OrdersService();
