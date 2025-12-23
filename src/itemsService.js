@@ -305,6 +305,126 @@ class ItemsService {
       errorCount: errors.length,
     };
   }
+
+  // Export all items to JSON format
+  exportToJSON() {
+    return JSON.stringify(this.items, null, 2);
+  }
+
+  // Export items filtered by status
+  exportToJSONByStatus(status) {
+    const filtered = this.getAll(status);
+    return JSON.stringify(filtered, null, 2);
+  }
+
+  // Import items from JSON array
+  importFromJSON(jsonData) {
+    if (!jsonData || typeof jsonData !== "string") {
+      throw new ValidationError("JSON data must be a non-empty string");
+    }
+
+    let importedData;
+    try {
+      importedData = JSON.parse(jsonData);
+    } catch (error) {
+      throw new ValidationError(`Invalid JSON format: ${error.message}`);
+    }
+
+    if (!Array.isArray(importedData)) {
+      throw new ValidationError("JSON data must be an array of items");
+    }
+
+    if (importedData.length === 0) {
+      throw new ValidationError("Cannot import empty array");
+    }
+
+    if (importedData.length > 1000) {
+      throw new ValidationError("Cannot import more than 1000 items at once");
+    }
+
+    const imported = [];
+    const errors = [];
+    const skipped = [];
+
+    for (let i = 0; i < importedData.length; i++) {
+      const item = importedData[i];
+      
+      try {
+        // Validate required fields
+        if (!item.name || typeof item.name !== "string") {
+          errors.push({
+            index: i,
+            item,
+            error: "Missing or invalid name field",
+          });
+          continue;
+        }
+
+        // Check if item already exists (by name)
+        const existing = this.items.find(
+          (existingItem) =>
+            existingItem.name.toLowerCase() === item.name.toLowerCase()
+        );
+
+        if (existing) {
+          skipped.push({
+            index: i,
+            item,
+            reason: "Item with same name already exists",
+          });
+          continue;
+        }
+
+        // Create the item
+        const created = this.create(item.name);
+        
+        // Update status if provided and valid
+        if (item.status && ["active", "archived", "deleted"].includes(item.status)) {
+          created.status = item.status;
+        }
+
+        imported.push(created);
+      } catch (error) {
+        errors.push({
+          index: i,
+          item,
+          error: error.message,
+        });
+      }
+    }
+
+    return {
+      imported,
+      errors,
+      skipped,
+      successCount: imported.length,
+      errorCount: errors.length,
+      skippedCount: skipped.length,
+    };
+  }
+
+  // Export items to CSV format
+  exportToCSV() {
+    if (this.items.length === 0) {
+      return "id,name,status,createdAt,updatedAt\n";
+    }
+
+    const headers = ["id", "name", "status", "createdAt", "updatedAt"];
+    const rows = [headers.join(",")];
+
+    for (const item of this.items) {
+      const row = [
+        item.id,
+        `"${item.name.replace(/"/g, '""')}"`, // Escape quotes in CSV
+        item.status,
+        item.createdAt,
+        item.updatedAt,
+      ];
+      rows.push(row.join(","));
+    }
+
+    return rows.join("\n");
+  }
 }
 
 module.exports = new ItemsService();
