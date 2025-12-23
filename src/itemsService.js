@@ -168,6 +168,34 @@ class ItemsService {
       item.name.toLowerCase().includes(lowerQuery)
     );
   }
+
+  // Get items with pagination
+  getPaginated(page = 1, limit = 10, status = null) {
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.max(1, Math.min(100, Number(limit) || 10));
+    
+    let filteredItems = [...this.items];
+    if (status) {
+      filteredItems = filteredItems.filter((item) => item.status === status);
+    }
+    
+    const total = filteredItems.length;
+    const totalPages = Math.ceil(total / limitNum);
+    const offset = (pageNum - 1) * limitNum;
+    const paginatedItems = filteredItems.slice(offset, offset + limitNum);
+    
+    return {
+      items: paginatedItems,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages,
+        hasNext: pageNum < totalPages,
+        hasPrev: pageNum > 1,
+      },
+    };
+  }
 }
 
 module.exports = new ItemsService();
