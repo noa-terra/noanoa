@@ -196,6 +196,115 @@ class ItemsService {
       },
     };
   }
+
+  // Bulk create items
+  bulkCreate(names) {
+    if (!Array.isArray(names) || names.length === 0) {
+      throw new ValidationError("Names must be a non-empty array");
+    }
+    if (names.length > 100) {
+      throw new ValidationError("Cannot create more than 100 items at once");
+    }
+
+    const created = [];
+    const errors = [];
+
+    for (let i = 0; i < names.length; i++) {
+      try {
+        const item = this.create(names[i]);
+        created.push(item);
+      } catch (error) {
+        errors.push({
+          index: i,
+          name: names[i],
+          error: error.message,
+        });
+      }
+    }
+
+    return {
+      created,
+      errors,
+      successCount: created.length,
+      errorCount: errors.length,
+    };
+  }
+
+  // Bulk update items
+  bulkUpdate(updates) {
+    if (!Array.isArray(updates) || updates.length === 0) {
+      throw new ValidationError("Updates must be a non-empty array");
+    }
+    if (updates.length > 100) {
+      throw new ValidationError("Cannot update more than 100 items at once");
+    }
+
+    const updated = [];
+    const errors = [];
+
+    for (let i = 0; i < updates.length; i++) {
+      const update = updates[i];
+      if (!update.id) {
+        errors.push({
+          index: i,
+          update,
+          error: "Missing required field: id",
+        });
+        continue;
+      }
+
+      try {
+        const item = this.update(update.id, update);
+        updated.push(item);
+      } catch (error) {
+        errors.push({
+          index: i,
+          id: update.id,
+          error: error.message,
+        });
+      }
+    }
+
+    return {
+      updated,
+      errors,
+      successCount: updated.length,
+      errorCount: errors.length,
+    };
+  }
+
+  // Bulk delete items
+  bulkDelete(ids) {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      throw new ValidationError("Ids must be a non-empty array");
+    }
+    if (ids.length > 100) {
+      throw new ValidationError("Cannot delete more than 100 items at once");
+    }
+
+    const deleted = [];
+    const errors = [];
+
+    for (let i = 0; i < ids.length; i++) {
+      try {
+        const result = this.delete(ids[i]);
+        deleted.push(result.deletedId);
+      } catch (error) {
+        errors.push({
+          index: i,
+          id: ids[i],
+          error: error.message,
+        });
+      }
+    }
+
+    return {
+      deleted,
+      errors,
+      successCount: deleted.length,
+      errorCount: errors.length,
+    };
+  }
 }
 
 module.exports = new ItemsService();
