@@ -241,6 +241,74 @@ class OrdersService {
       (order) => order.total >= min && order.total <= max
     );
   }
+
+  // Get orders with sorting
+  getSorted(sortBy = "createdAt", order = "desc") {
+    const validSortFields = ["id", "customerName", "productId", "quantity", "total", "status", "createdAt", "updatedAt"];
+    const validOrders = ["asc", "desc"];
+
+    if (!validSortFields.includes(sortBy)) {
+      throw new ValidationError(
+        `Invalid sort field. Must be one of: ${validSortFields.join(", ")}`
+      );
+    }
+
+    if (!validOrders.includes(order.toLowerCase())) {
+      throw new ValidationError(`Invalid sort order. Must be 'asc' or 'desc'`);
+    }
+
+    const sorted = [...this.orders].sort((a, b) => {
+      let aValue = a[sortBy];
+      let bValue = b[sortBy];
+
+      // Handle string comparison
+      if (typeof aValue === "string") {
+        aValue = aValue.toLowerCase();
+        bValue = bValue.toLowerCase();
+      }
+
+      // Handle date comparison
+      if (sortBy === "createdAt" || sortBy === "updatedAt") {
+        aValue = new Date(aValue).getTime();
+        bValue = new Date(bValue).getTime();
+      }
+
+      if (aValue < bValue) {
+        return order.toLowerCase() === "asc" ? -1 : 1;
+      }
+      if (aValue > bValue) {
+        return order.toLowerCase() === "asc" ? 1 : -1;
+      }
+      return 0;
+    });
+
+    return sorted;
+  }
+
+  // Get orders grouped by status
+  getGroupedByStatus() {
+    const grouped = {};
+    for (const order of this.orders) {
+      if (!grouped[order.status]) {
+        grouped[order.status] = [];
+      }
+      grouped[order.status].push(order);
+    }
+    return grouped;
+  }
+
+  // Get orders grouped by customer
+  getGroupedByCustomer() {
+    const grouped = {};
+    for (const order of this.orders) {
+      const customerKey = order.customerName.toLowerCase();
+      if (!grouped[customerKey]) {
+        grouped[customerKey] = [];
+      }
+      grouped[customerKey].push(order);
+    }
+    return grouped;
+  }
 }
 
 module.exports = new OrdersService();
