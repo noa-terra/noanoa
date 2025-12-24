@@ -40,6 +40,28 @@ class OrdersService {
       },
     ];
     this.nextId = 3;
+    // Audit log for tracking all changes
+    this.auditLog = [];
+  }
+
+  // Log audit entry
+  _logAudit(action, orderId, details, userId = "system") {
+    const auditEntry = {
+      id: this.auditLog.length + 1,
+      action, // 'create', 'update', 'delete', 'status_change', etc.
+      orderId,
+      userId,
+      timestamp: new Date().toISOString(),
+      details,
+    };
+    this.auditLog.push(auditEntry);
+    
+    // Keep only last 10000 audit entries to prevent memory issues
+    if (this.auditLog.length > 10000) {
+      this.auditLog.shift();
+    }
+    
+    return auditEntry;
   }
 
   // Validation helpers
@@ -117,6 +139,16 @@ class OrdersService {
     };
 
     this.orders.push(order);
+    
+    // Log audit entry
+    this._logAudit("create", order.id, {
+      customerName: order.customerName,
+      productId: order.productId,
+      quantity: order.quantity,
+      total: order.total,
+      status: order.status,
+    });
+    
     return order;
   }
 
@@ -147,7 +179,28 @@ class OrdersService {
       order.status = updates.status;
     }
 
+    const changes = {};
+    if (updates.customerName !== undefined) {
+      changes.customerName = { from: order.customerName, to: updates.customerName };
+    }
+    if (updates.quantity !== undefined) {
+      changes.quantity = { from: order.quantity, to: updates.quantity };
+      changes.total = { from: order.total, to: Math.round(order.price * updates.quantity * 100) / 100 };
+    }
+    if (updates.status !== undefined) {
+      changes.status = { from: order.status, to: updates.status };
+    }
+
     order.updatedAt = new Date().toISOString();
+    
+    // Log audit entry
+    if (Object.keys(changes).length > 0) {
+      this._logAudit("update", id, {
+        changes,
+        previousState: { ...order },
+      });
+    }
+    
     return order;
   }
 
@@ -163,6 +216,11 @@ class OrdersService {
       throw new OrderNotFoundError(orderId);
     }
 
+    // Log audit entry before deletion
+    this._logAudit("delete", orderId, {
+      order: { ...order },
+    });
+    
     this.orders.splice(index, 1);
     return { success: true, deletedId: orderId };
   }
@@ -624,6 +682,80 @@ class OrdersService {
     }
 
     return results;
+  }
+
+  // Get audit log for a specific order
+  getAuditLog(orderId) {
+    const orderIdNum = Number(orderId);
+    if (Number.isNaN(orderIdNum)) {
+      throw new ValidationError(`Invalid orderId: ${orderId}`);
+    }
+    return this.auditLog.filter((entry) => entry.orderId === orderIdNum);
+  }
+
+  // Get all audit logs with optional filtering
+  getAllAuditLogs(filters = {}) {
+    let logs = [...this.auditLog];
+
+    if (filters.orderId !== undefined) {
+      const orderId = Number(filters.orderId);
+      if (!Number.isNaN(orderId)) {
+        logs = logs.filter((entry) => entry.orderId === orderId);
+      }
+    }
+
+    if (filters.action) {
+      logs = logs.filter((entry) => entry.action === filters.action);
+    }
+
+    if (filters.userId) {
+      logs = logs.filter((entry) => entry.userId === filters.userId);
+    }
+
+    if (filters.startDate && filters.endDate) {
+      const start = new Date(filters.startDate);
+      const end = new Date(filters.endDate);
+      logs = logs.filter((entry) => {
+        const entryDate = new Date(entry.timestamp);
+        return entryDate >= start && entryDate <= end;
+      });
+    }
+
+    // Sort by timestamp (newest first)
+    logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    // Limit results
+    if (filters.limit) {
+      const limit = Number(filters.limit);
+      if (!Number.isNaN(limit) && limit > 0) {
+        logs = logs.slice(0, limit);
+      }
+    }
+
+    return logs;
+  }
+
+  // Get audit statistics
+  getAuditStats() {
+    const stats = {
+      totalEntries: this.auditLog.length,
+      byAction: {},
+      byUser: {},
+      recentActivity: this.auditLog
+        .slice(-100)
+        .map((entry) => ({
+          action: entry.action,
+          orderId: entry.orderId,
+          timestamp: entry.timestamp,
+        })),
+    };
+
+    for (const entry of this.auditLog) {
+      stats.byAction[entry.action] = (stats.byAction[entry.action] || 0) + 1;
+      stats.byUser[entry.userId] = (stats.byUser[entry.userId] || 0) + 1;
+    }
+
+    return stats;
   }
 }
 
