@@ -224,6 +224,179 @@ class ProductsService {
       (product) => product.category.toLowerCase() === category.toLowerCase()
     );
   }
+
+  // Advanced search with multiple filters
+  advancedSearch(filters) {
+    if (!filters || typeof filters !== "object") {
+      return this.products;
+    }
+
+    let results = [...this.products];
+
+    // Filter by name (supports partial match)
+    if (filters.name) {
+      const nameQuery = filters.name.toLowerCase();
+      results = results.filter((product) =>
+        product.name.toLowerCase().includes(nameQuery)
+      );
+    }
+
+    // Filter by category
+    if (filters.category) {
+      results = results.filter(
+        (product) =>
+          product.category.toLowerCase() === filters.category.toLowerCase()
+      );
+    }
+
+    // Filter by status
+    if (filters.status) {
+      results = results.filter(
+        (product) => product.status === filters.status
+      );
+    }
+
+    // Filter by price range
+    if (filters.minPrice !== undefined) {
+      const minPrice = Number(filters.minPrice);
+      if (!Number.isNaN(minPrice)) {
+        results = results.filter((product) => product.price >= minPrice);
+      }
+    }
+
+    if (filters.maxPrice !== undefined) {
+      const maxPrice = Number(filters.maxPrice);
+      if (!Number.isNaN(maxPrice)) {
+        results = results.filter((product) => product.price <= maxPrice);
+      }
+    }
+
+    // Filter by stock range
+    if (filters.minStock !== undefined) {
+      const minStock = Number(filters.minStock);
+      if (!Number.isNaN(minStock)) {
+        results = results.filter((product) => product.stock >= minStock);
+      }
+    }
+
+    if (filters.maxStock !== undefined) {
+      const maxStock = Number(filters.maxStock);
+      if (!Number.isNaN(maxStock)) {
+        results = results.filter((product) => product.stock <= maxStock);
+      }
+    }
+
+    // Sort results
+    if (filters.sortBy) {
+      const sortField = filters.sortBy;
+      const sortOrder = filters.sortOrder || "asc";
+      const validSortFields = ["name", "price", "stock", "category", "createdAt"];
+
+      if (validSortFields.includes(sortField)) {
+        results.sort((a, b) => {
+          let aValue = a[sortField];
+          let bValue = b[sortField];
+
+          if (typeof aValue === "string") {
+            aValue = aValue.toLowerCase();
+            bValue = bValue.toLowerCase();
+          }
+
+          if (sortField === "createdAt") {
+            aValue = new Date(aValue).getTime();
+            bValue = new Date(bValue).getTime();
+          }
+
+          if (aValue < bValue) {
+            return sortOrder === "asc" ? -1 : 1;
+          }
+          if (aValue > bValue) {
+            return sortOrder === "asc" ? 1 : -1;
+          }
+          return 0;
+        });
+      }
+    }
+
+    // Limit results
+    if (filters.limit) {
+      const limit = Number(filters.limit);
+      if (!Number.isNaN(limit) && limit > 0) {
+        results = results.slice(0, limit);
+      }
+    }
+
+    return results;
+  }
+
+  // Search products by multiple criteria with exact match
+  searchByCriteria(criteria) {
+    if (!criteria || typeof criteria !== "object") {
+      return [];
+    }
+
+    let results = [...this.products];
+    let hasFilters = false;
+
+    if (criteria.name) {
+      results = results.filter(
+        (product) => product.name.toLowerCase() === criteria.name.toLowerCase()
+      );
+      hasFilters = true;
+    }
+
+    if (criteria.category) {
+      results = results.filter(
+        (product) =>
+          product.category.toLowerCase() === criteria.category.toLowerCase()
+      );
+      hasFilters = true;
+    }
+
+    if (criteria.status) {
+      results = results.filter((product) => product.status === criteria.status);
+      hasFilters = true;
+    }
+
+    if (criteria.productId !== undefined) {
+      const productId = Number(criteria.productId);
+      if (!Number.isNaN(productId)) {
+        results = results.filter((product) => product.id === productId);
+        hasFilters = true;
+      }
+    }
+
+    return hasFilters ? results : [];
+  }
+
+  // Get products matching any of the provided categories
+  getByCategories(categories) {
+    if (!Array.isArray(categories) || categories.length === 0) {
+      return [];
+    }
+
+    const lowerCategories = categories.map((cat) => cat.toLowerCase());
+    return this.products.filter((product) =>
+      lowerCategories.includes(product.category.toLowerCase())
+    );
+  }
+
+  // Get products by name pattern (supports wildcards)
+  searchByNamePattern(pattern) {
+    if (!pattern || typeof pattern !== "string") {
+      throw new ValidationError("Pattern must be a non-empty string");
+    }
+
+    // Convert simple wildcard pattern to regex
+    const regexPattern = pattern
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&") // Escape special regex chars
+      .replace(/\*/g, ".*") // Convert * to .*
+      .replace(/\?/g, "."); // Convert ? to .
+
+    const regex = new RegExp(regexPattern, "i"); // Case insensitive
+
+    return this.products.filter((product) => regex.test(product.name));
+  }
 }
 
 module.exports = new ProductsService();
