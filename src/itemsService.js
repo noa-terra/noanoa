@@ -429,6 +429,235 @@ class ItemsService {
     
     return this.items.filter((item) => regex.test(item.name));
   }
+
+  // Enhanced bulk create with transaction support (all or nothing)
+  bulkCreateTransactional(names, options = {}) {
+    if (!Array.isArray(names) || names.length === 0) {
+      throw new ValidationError("Names must be a non-empty array");
+    }
+    if (names.length > 100) {
+      throw new ValidationError("Cannot create more than 100 items at once");
+    }
+
+    const rollback = options.rollbackOnError !== false; // Default: true
+    const created = [];
+    const errors = [];
+
+    // Snapshot for rollback
+    const snapshot = {
+      items: [...this.items],
+      nextId: this.nextId,
+    };
+
+    try {
+      for (let i = 0; i < names.length; i++) {
+        try {
+          const item = this.create(names[i]);
+          created.push(item);
+        } catch (error) {
+          errors.push({
+            index: i,
+            name: names[i],
+            error: error.message,
+          });
+
+          if (rollback && errors.length > 0) {
+            // Rollback: restore snapshot
+            this.items = snapshot.items;
+            this.nextId = snapshot.nextId;
+            this._rebuildIndexes();
+            throw new ValidationError(
+              `Transaction failed at index ${i}: ${error.message}. All changes rolled back.`
+            );
+          }
+        }
+      }
+
+      return {
+        created,
+        errors,
+        successCount: created.length,
+        errorCount: errors.length,
+        transactional: rollback,
+      };
+    } catch (error) {
+      // Ensure rollback happened
+      if (rollback) {
+        this.items = snapshot.items;
+        this.nextId = snapshot.nextId;
+        this._rebuildIndexes();
+      }
+      throw error;
+    }
+  }
+
+  // Enhanced bulk update with validation before execution
+  bulkUpdateWithValidation(updates) {
+    if (!Array.isArray(updates) || updates.length === 0) {
+      throw new ValidationError("Updates must be a non-empty array");
+    }
+    if (updates.length > 100) {
+      throw new ValidationError("Cannot update more than 100 items at once");
+    }
+
+    // Pre-validate all updates before executing any
+    const validationErrors = [];
+    for (let i = 0; i < updates.length; i++) {
+      const update = updates[i];
+      if (!update.id) {
+        validationErrors.push({
+          index: i,
+          update,
+          error: "Missing required field: id",
+        });
+        continue;
+      }
+
+      // Check if item exists
+      if (!this.indexes.byId.has(Number(update.id))) {
+        validationErrors.push({
+          index: i,
+          id: update.id,
+          error: "Item not found",
+        });
+        continue;
+      }
+
+      // Validate update data
+      try {
+        if (update.name !== undefined) {
+          this.validateName(update.name);
+        }
+        if (update.status !== undefined) {
+          this.validateStatus(update.status);
+        }
+      } catch (error) {
+        validationErrors.push({
+          index: i,
+          id: update.id,
+          error: error.message,
+        });
+      }
+    }
+
+    // If any validation errors, return them without making changes
+    if (validationErrors.length > 0) {
+      return {
+        updated: [],
+        errors: validationErrors,
+        successCount: 0,
+        errorCount: validationErrors.length,
+        validated: true,
+      };
+    }
+
+    // All validations passed, proceed with updates
+    const updated = [];
+    for (let i = 0; i < updates.length; i++) {
+      const item = this.update(updates[i].id, updates[i]);
+      updated.push(item);
+    }
+
+    return {
+      updated,
+      errors: [],
+      successCount: updated.length,
+      errorCount: 0,
+      validated: true,
+    };
+  }
+
+  // Batch operations: create, update, delete in one transaction
+  batchOperations(operations) {
+    if (!Array.isArray(operations) || operations.length === 0) {
+      throw new ValidationError("Operations must be a non-empty array");
+    }
+    if (operations.length > 100) {
+      throw new ValidationError("Cannot process more than 100 operations at once");
+    }
+
+    const results = {
+      created: [],
+      updated: [],
+      deleted: [],
+      errors: [],
+    };
+
+    // Snapshot for rollback
+    const snapshot = {
+      items: [...this.items],
+      nextId: this.nextId,
+    };
+
+    try {
+      for (let i = 0; i < operations.length; i++) {
+        const operation = operations[i];
+        const { type, data } = operation;
+
+        try {
+          switch (type) {
+            case "create":
+              if (!data || !data.name) {
+                throw new ValidationError("Create operation requires 'name' in data");
+              }
+              const created = this.create(data.name);
+              if (data.status) {
+                this.update(created.id, { status: data.status });
+                created.status = data.status;
+              }
+              results.created.push(created);
+              break;
+
+            case "update":
+              if (!data || !data.id) {
+                throw new ValidationError("Update operation requires 'id' in data");
+              }
+              const updated = this.update(data.id, data);
+              results.updated.push(updated);
+              break;
+
+            case "delete":
+              if (!data || !data.id) {
+                throw new ValidationError("Delete operation requires 'id' in data");
+              }
+              const deleted = this.delete(data.id);
+              results.deleted.push(deleted.deletedId);
+              break;
+
+            default:
+              throw new ValidationError(`Unknown operation type: ${type}`);
+          }
+        } catch (error) {
+          results.errors.push({
+            index: i,
+            operation: type,
+            data,
+            error: error.message,
+          });
+          // Rollback on any error
+          this.items = snapshot.items;
+          this.nextId = snapshot.nextId;
+          this._rebuildIndexes();
+          throw new ValidationError(
+            `Batch operation failed at index ${i}: ${error.message}. All changes rolled back.`
+          );
+        }
+      }
+
+      return {
+        ...results,
+        successCount:
+          results.created.length + results.updated.length + results.deleted.length,
+        errorCount: results.errors.length,
+      };
+    } catch (error) {
+      // Ensure rollback
+      this.items = snapshot.items;
+      this.nextId = snapshot.nextId;
+      this._rebuildIndexes();
+      throw error;
+    }
+  }
 }
 
 module.exports = new ItemsService();
