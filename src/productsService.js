@@ -359,6 +359,206 @@ class ProductsService {
       (product) => product.category.toLowerCase() === category.toLowerCase()
     );
   }
+
+  // Adjust stock level (add or subtract)
+  adjustStock(productId, quantity, reason = "manual_adjustment") {
+    const product = this.getById(productId);
+    const currentStock = product.stock;
+    const adjustment = Number(quantity);
+    
+    if (Number.isNaN(adjustment)) {
+      throw new ValidationError("Quantity must be a valid number");
+    }
+
+    const newStock = currentStock + adjustment;
+    
+    if (newStock < 0) {
+      throw new ValidationError(
+        `Cannot adjust stock below 0. Current: ${currentStock}, Adjustment: ${adjustment}`
+      );
+    }
+
+    product.stock = this.validateStock(newStock);
+    product.updatedAt = new Date().toISOString();
+
+    return {
+      productId: product.id,
+      previousStock: currentStock,
+      adjustment,
+      newStock: product.stock,
+      reason,
+      timestamp: product.updatedAt,
+    };
+  }
+
+  // Set reorder point for a product
+  setReorderPoint(productId, reorderPoint) {
+    const product = this.getById(productId);
+    const point = Number(reorderPoint);
+    
+    if (Number.isNaN(point) || point < 0 || !Number.isInteger(point)) {
+      throw new ValidationError("Reorder point must be a non-negative integer");
+    }
+
+    if (!product.reorderSettings) {
+      product.reorderSettings = {};
+    }
+    
+    product.reorderSettings.reorderPoint = point;
+    product.updatedAt = new Date().toISOString();
+
+    return {
+      productId: product.id,
+      reorderPoint: point,
+      currentStock: product.stock,
+      needsReorder: product.stock <= point,
+    };
+  }
+
+  // Get products that need reordering
+  getProductsNeedingReorder() {
+    return this.products.filter((product) => {
+      if (!product.reorderSettings || !product.reorderSettings.reorderPoint) {
+        return false;
+      }
+      return product.stock <= product.reorderSettings.reorderPoint;
+    });
+  }
+
+  // Reserve stock (for pending orders)
+  reserveStock(productId, quantity) {
+    const product = this.getById(productId);
+    const qty = Number(quantity);
+    
+    if (Number.isNaN(qty) || qty <= 0 || !Number.isInteger(qty)) {
+      throw new ValidationError("Reservation quantity must be a positive integer");
+    }
+
+    const availableStock = product.stock - (product.reservedStock || 0);
+    
+    if (qty > availableStock) {
+      throw new ValidationError(
+        `Cannot reserve ${qty} units. Available: ${availableStock}, Current stock: ${product.stock}, Already reserved: ${product.reservedStock || 0}`
+      );
+    }
+
+    if (!product.reservedStock) {
+      product.reservedStock = 0;
+    }
+    
+    product.reservedStock += qty;
+    product.updatedAt = new Date().toISOString();
+
+    return {
+      productId: product.id,
+      reserved: qty,
+      totalReserved: product.reservedStock,
+      availableStock: product.stock - product.reservedStock,
+    };
+  }
+
+  // Release reserved stock
+  releaseStock(productId, quantity) {
+    const product = this.getById(productId);
+    const qty = Number(quantity);
+    
+    if (Number.isNaN(qty) || qty <= 0 || !Number.isInteger(qty)) {
+      throw new ValidationError("Release quantity must be a positive integer");
+    }
+
+    if (!product.reservedStock || product.reservedStock < qty) {
+      throw new ValidationError(
+        `Cannot release ${qty} units. Currently reserved: ${product.reservedStock || 0}`
+      );
+    }
+
+    product.reservedStock -= qty;
+    
+    if (product.reservedStock === 0) {
+      delete product.reservedStock;
+    }
+    
+    product.updatedAt = new Date().toISOString();
+
+    return {
+      productId: product.id,
+      released: qty,
+      remainingReserved: product.reservedStock || 0,
+      availableStock: product.stock - (product.reservedStock || 0),
+    };
+  }
+
+  // Get available stock (total - reserved)
+  getAvailableStock(productId) {
+    const product = this.getById(productId);
+    const reserved = product.reservedStock || 0;
+    return product.stock - reserved;
+  }
+
+  // Get inventory summary
+  getInventorySummary() {
+    const summary = {
+      totalProducts: this.products.length,
+      totalStock: 0,
+      totalReserved: 0,
+      totalAvailable: 0,
+      lowStockProducts: [],
+      outOfStockProducts: [],
+      needsReorder: [],
+      byStatus: {
+        active: { count: 0, totalStock: 0 },
+        inactive: { count: 0, totalStock: 0 },
+        discontinued: { count: 0, totalStock: 0 },
+      },
+    };
+
+    for (const product of this.products) {
+      const reserved = product.reservedStock || 0;
+      const available = product.stock - reserved;
+      
+      summary.totalStock += product.stock;
+      summary.totalReserved += reserved;
+      summary.totalAvailable += available;
+
+      // Track by status
+      if (summary.byStatus[product.status]) {
+        summary.byStatus[product.status].count++;
+        summary.byStatus[product.status].totalStock += product.stock;
+      }
+
+      // Low stock (less than 10)
+      if (product.stock < 10 && product.stock > 0) {
+        summary.lowStockProducts.push({
+          id: product.id,
+          name: product.name,
+          stock: product.stock,
+          reserved,
+          available,
+        });
+      }
+
+      // Out of stock
+      if (product.stock === 0) {
+        summary.outOfStockProducts.push({
+          id: product.id,
+          name: product.name,
+          category: product.category,
+        });
+      }
+
+      // Needs reorder
+      if (product.reorderSettings && product.stock <= product.reorderSettings.reorderPoint) {
+        summary.needsReorder.push({
+          id: product.id,
+          name: product.name,
+          stock: product.stock,
+          reorderPoint: product.reorderSettings.reorderPoint,
+        });
+      }
+    }
+
+    return summary;
+  }
 }
 
 module.exports = new ProductsService();
