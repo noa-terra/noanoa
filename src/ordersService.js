@@ -431,6 +431,200 @@ class OrdersService {
       },
     };
   }
+
+  // Get orders by multiple statuses
+  getByStatuses(statuses) {
+    if (!Array.isArray(statuses) || statuses.length === 0) {
+      return [];
+    }
+
+    const validStatuses = ["pending", "processing", "shipped", "completed", "cancelled"];
+    const filteredStatuses = statuses.filter((status) => validStatuses.includes(status));
+
+    if (filteredStatuses.length === 0) {
+      return [];
+    }
+
+    return this.orders.filter((order) => filteredStatuses.includes(order.status));
+  }
+
+  // Get orders by multiple product IDs
+  getByProductIds(productIds) {
+    if (!Array.isArray(productIds) || productIds.length === 0) {
+      return [];
+    }
+
+    const validProductIds = productIds
+      .map((id) => Number(id))
+      .filter((id) => !Number.isNaN(id) && id > 0);
+
+    if (validProductIds.length === 0) {
+      return [];
+    }
+
+    return this.orders.filter((order) => validProductIds.includes(order.productId));
+  }
+
+  // Get orders by multiple customers
+  getByCustomers(customerNames) {
+    if (!Array.isArray(customerNames) || customerNames.length === 0) {
+      return [];
+    }
+
+    const lowerNames = customerNames.map((name) => name.toLowerCase());
+    return this.orders.filter((order) =>
+      lowerNames.includes(order.customerName.toLowerCase())
+    );
+  }
+
+  // Get orders with quantity range
+  getByQuantityRange(minQuantity = 0, maxQuantity = Infinity) {
+    const min = Number(minQuantity) || 0;
+    const max = Number(maxQuantity) || Infinity;
+
+    if (min < 0 || max < 0) {
+      throw new ValidationError("Quantity range values must be non-negative");
+    }
+    if (min > max) {
+      throw new ValidationError("Minimum quantity cannot be greater than maximum quantity");
+    }
+
+    return this.orders.filter(
+      (order) => order.quantity >= min && order.quantity <= max
+    );
+  }
+
+  // Advanced query with multiple filters
+  advancedQuery(filters) {
+    if (!filters || typeof filters !== "object") {
+      return this.orders;
+    }
+
+    let results = [...this.orders];
+
+    // Filter by status
+    if (filters.status) {
+      if (Array.isArray(filters.status)) {
+        results = this.getByStatuses(filters.status);
+      } else {
+        results = results.filter((order) => order.status === filters.status);
+      }
+    }
+
+    // Filter by customer
+    if (filters.customerName) {
+      const customerQuery = filters.customerName.toLowerCase();
+      results = results.filter((order) =>
+        order.customerName.toLowerCase().includes(customerQuery)
+      );
+    }
+
+    // Filter by product ID
+    if (filters.productId !== undefined) {
+      const productId = Number(filters.productId);
+      if (!Number.isNaN(productId)) {
+        results = results.filter((order) => order.productId === productId);
+      }
+    }
+
+    // Filter by multiple product IDs
+    if (filters.productIds && Array.isArray(filters.productIds)) {
+      results = results.filter((order) =>
+        filters.productIds.includes(order.productId)
+      );
+    }
+
+    // Filter by total range
+    if (filters.minTotal !== undefined) {
+      const minTotal = Number(filters.minTotal);
+      if (!Number.isNaN(minTotal)) {
+        results = results.filter((order) => order.total >= minTotal);
+      }
+    }
+
+    if (filters.maxTotal !== undefined) {
+      const maxTotal = Number(filters.maxTotal);
+      if (!Number.isNaN(maxTotal)) {
+        results = results.filter((order) => order.total <= maxTotal);
+      }
+    }
+
+    // Filter by quantity range
+    if (filters.minQuantity !== undefined) {
+      const minQuantity = Number(filters.minQuantity);
+      if (!Number.isNaN(minQuantity)) {
+        results = results.filter((order) => order.quantity >= minQuantity);
+      }
+    }
+
+    if (filters.maxQuantity !== undefined) {
+      const maxQuantity = Number(filters.maxQuantity);
+      if (!Number.isNaN(maxQuantity)) {
+        results = results.filter((order) => order.quantity <= maxQuantity);
+      }
+    }
+
+    // Filter by date range
+    if (filters.startDate && filters.endDate) {
+      results = results.filter((order) => {
+        const orderDate = new Date(order.createdAt);
+        const start = new Date(filters.startDate);
+        const end = new Date(filters.endDate);
+        return orderDate >= start && orderDate <= end;
+      });
+    }
+
+    // Sort results
+    if (filters.sortBy) {
+      const sortField = filters.sortBy;
+      const sortOrder = filters.sortOrder || "desc";
+      const validSortFields = [
+        "id",
+        "customerName",
+        "productId",
+        "quantity",
+        "total",
+        "status",
+        "createdAt",
+        "updatedAt",
+      ];
+
+      if (validSortFields.includes(sortField)) {
+        results.sort((a, b) => {
+          let aValue = a[sortField];
+          let bValue = b[sortField];
+
+          if (typeof aValue === "string") {
+            aValue = aValue.toLowerCase();
+            bValue = bValue.toLowerCase();
+          }
+
+          if (sortField === "createdAt" || sortField === "updatedAt") {
+            aValue = new Date(aValue).getTime();
+            bValue = new Date(bValue).getTime();
+          }
+
+          if (aValue < bValue) {
+            return sortOrder === "asc" ? -1 : 1;
+          }
+          if (aValue > bValue) {
+            return sortOrder === "asc" ? 1 : -1;
+          }
+          return 0;
+        });
+      }
+    }
+
+    // Limit results
+    if (filters.limit) {
+      const limit = Number(filters.limit);
+      if (!Number.isNaN(limit) && limit > 0) {
+        results = results.slice(0, limit);
+      }
+    }
+
+    return results;
+  }
 }
 
 module.exports = new OrdersService();
