@@ -1,3 +1,6 @@
+// Import crypto for secure random ID generation
+const crypto = require("crypto");
+
 // Simple in-memory rate limiting store
 const requestCounts = new Map();
 
@@ -14,12 +17,38 @@ const requestMetrics = {
   errorsByType: new Map(),
 };
 
+// Secure function to extract client IP (handles proxies securely)
+function getClientIp(req) {
+  // Check for forwarded headers (in order of preference)
+  const forwardedFor = req.get("x-forwarded-for");
+  if (forwardedFor) {
+    // X-Forwarded-For can contain multiple IPs, take the first one
+    const ips = forwardedFor.split(",").map((ip) => ip.trim());
+    // Validate IP format before using
+    const validIp = ips.find((ip) => /^[\d.]+$/.test(ip) || /^[\da-f:]+$/i.test(ip));
+    if (validIp) return validIp;
+  }
+
+  const realIp = req.get("x-real-ip");
+  if (realIp && (/^[\d.]+$/.test(realIp) || /^[\da-f:]+$/i.test(realIp))) {
+    return realIp;
+  }
+
+  // Fallback to connection IP
+  return req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || "unknown";
+}
+
+// Secure request ID generation using crypto
+function generateSecureRequestId() {
+  return crypto.randomBytes(16).toString("hex");
+}
+
 // Logging middleware function
 function loggingMiddleware(req, res, next) {
   const startTime = Date.now();
   const timestamp = new Date().toISOString();
-  const requestId = Math.random().toString(36).substring(7);
-  const clientIp = req.ip || req.connection.remoteAddress || "unknown";
+  const requestId = generateSecureRequestId();
+  const clientIp = getClientIp(req);
 
   // IP whitelist/blacklist check
   if (ipBlacklist.has(clientIp)) {
