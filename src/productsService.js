@@ -70,7 +70,142 @@ class ProductsService {
     if (Number.isNaN(stockNum) || stockNum < 0 || !Number.isInteger(stockNum)) {
       throw new ValidationError("Stock must be a non-negative integer");
     }
+    // Additional validation: prevent unreasonably large stock values
+    const maxStock = 1000000; // 1 million max
+    if (stockNum > maxStock) {
+      throw new ValidationError(`Stock cannot exceed ${maxStock}`);
+    }
     return stockNum;
+  }
+
+  validateCategory(category) {
+    if (!category || typeof category !== "string") {
+      throw new ValidationError("Category must be a non-empty string");
+    }
+    const trimmed = category.trim();
+    if (trimmed.length === 0) {
+      throw new ValidationError("Category cannot be empty");
+    }
+    if (trimmed.length > 100) {
+      throw new ValidationError("Category cannot exceed 100 characters");
+    }
+    // Validate category doesn't contain special characters that could cause issues
+    if (!/^[a-zA-Z0-9\s\-_&]+$/.test(trimmed)) {
+      throw new ValidationError("Category contains invalid characters");
+    }
+    return trimmed;
+  }
+
+  // Validate complete product data object
+  validateProductData(data) {
+    const errors = [];
+
+    if (!data || typeof data !== "object") {
+      throw new ValidationError("Product data must be an object");
+    }
+
+    // Validate name
+    if (data.name !== undefined) {
+      try {
+        this.validateName(data.name);
+      } catch (error) {
+        errors.push(`Name: ${error.message}`);
+      }
+    } else if (data.name === undefined && !data.id) {
+      errors.push("Name is required");
+    }
+
+    // Validate price
+    if (data.price !== undefined) {
+      try {
+        this.validatePrice(data.price);
+      } catch (error) {
+        errors.push(`Price: ${error.message}`);
+      }
+    } else if (data.price === undefined && !data.id) {
+      errors.push("Price is required");
+    }
+
+    // Validate stock
+    if (data.stock !== undefined) {
+      try {
+        this.validateStock(data.stock);
+      } catch (error) {
+        errors.push(`Stock: ${error.message}`);
+      }
+    }
+
+    // Validate category
+    if (data.category !== undefined) {
+      try {
+        this.validateCategory(data.category);
+      } catch (error) {
+        errors.push(`Category: ${error.message}`);
+      }
+    }
+
+    // Validate status if provided
+    if (data.status !== undefined) {
+      const validStatuses = ["active", "inactive", "discontinued"];
+      if (!validStatuses.includes(data.status)) {
+        errors.push(
+          `Status: Invalid status. Must be one of: ${validStatuses.join(", ")}`
+        );
+      }
+    }
+
+    if (errors.length > 0) {
+      throw new ValidationError(`Validation errors: ${errors.join("; ")}`);
+    }
+
+    return true;
+  }
+
+  // Check data integrity across all products
+  checkDataIntegrity() {
+    const issues = [];
+
+    for (const product of this.products) {
+      // Check for missing required fields
+      if (!product.name || typeof product.name !== "string") {
+        issues.push(`Product ${product.id}: Missing or invalid name`);
+      }
+      if (product.price === undefined || Number.isNaN(product.price) || product.price < 0) {
+        issues.push(`Product ${product.id}: Invalid price`);
+      }
+      if (product.stock === undefined || !Number.isInteger(product.stock) || product.stock < 0) {
+        issues.push(`Product ${product.id}: Invalid stock`);
+      }
+      if (!product.category || typeof product.category !== "string") {
+        issues.push(`Product ${product.id}: Missing or invalid category`);
+      }
+      if (!product.status || !["active", "inactive", "discontinued"].includes(product.status)) {
+        issues.push(`Product ${product.id}: Invalid status`);
+      }
+      if (!product.createdAt || !product.updatedAt) {
+        issues.push(`Product ${product.id}: Missing timestamp fields`);
+      }
+    }
+
+    // Check for duplicate IDs
+    const ids = this.products.map((p) => p.id);
+    const duplicateIds = ids.filter((id, index) => ids.indexOf(id) !== index);
+    if (duplicateIds.length > 0) {
+      issues.push(`Duplicate product IDs found: ${[...new Set(duplicateIds)].join(", ")}`);
+    }
+
+    // Check for duplicate names
+    const names = this.products.map((p) => p.name.toLowerCase());
+    const duplicateNames = names.filter((name, index) => names.indexOf(name) !== index);
+    if (duplicateNames.length > 0) {
+      issues.push(`Duplicate product names found: ${[...new Set(duplicateNames)].join(", ")}`);
+    }
+
+    return {
+      isValid: issues.length === 0,
+      issues,
+      totalProducts: this.products.length,
+    };
   }
 
   // Get all products with optional filtering
