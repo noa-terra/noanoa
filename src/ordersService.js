@@ -309,6 +309,128 @@ class OrdersService {
     }
     return grouped;
   }
+
+  // Get total revenue by status
+  getRevenueByStatus() {
+    const revenue = {};
+    for (const order of this.orders) {
+      const status = order.status;
+      revenue[status] = (revenue[status] || 0) + order.total;
+    }
+    // Round to 2 decimal places
+    for (const status in revenue) {
+      revenue[status] = Math.round(revenue[status] * 100) / 100;
+    }
+    return revenue;
+  }
+
+  // Get total revenue by customer
+  getRevenueByCustomer() {
+    const revenue = {};
+    for (const order of this.orders) {
+      const customer = order.customerName;
+      revenue[customer] = (revenue[customer] || 0) + order.total;
+    }
+    // Round to 2 decimal places
+    for (const customer in revenue) {
+      revenue[customer] = Math.round(revenue[customer] * 100) / 100;
+    }
+    return revenue;
+  }
+
+  // Get total revenue by product
+  getRevenueByProduct() {
+    const revenue = {};
+    for (const order of this.orders) {
+      const productId = order.productId;
+      revenue[productId] = (revenue[productId] || 0) + order.total;
+    }
+    // Round to 2 decimal places
+    for (const productId in revenue) {
+      revenue[productId] = Math.round(revenue[productId] * 100) / 100;
+    }
+    return revenue;
+  }
+
+  // Get order count by status
+  getOrderCountByStatus() {
+    const counts = {};
+    for (const order of this.orders) {
+      counts[order.status] = (counts[order.status] || 0) + 1;
+    }
+    return counts;
+  }
+
+  // Get top customers by order count
+  getTopCustomersByOrderCount(limit = 10) {
+    const customerCounts = {};
+    for (const order of this.orders) {
+      const customer = order.customerName;
+      customerCounts[customer] = (customerCounts[customer] || 0) + 1;
+    }
+    
+    return Object.entries(customerCounts)
+      .map(([customer, count]) => ({ customer, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, limit);
+  }
+
+  // Get top customers by revenue
+  getTopCustomersByRevenue(limit = 10) {
+    const revenue = this.getRevenueByCustomer();
+    
+    return Object.entries(revenue)
+      .map(([customer, total]) => ({ customer, total }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, limit);
+  }
+
+  // Get average order value by status
+  getAverageOrderValueByStatus() {
+    const statusData = {};
+    
+    for (const order of this.orders) {
+      const status = order.status;
+      if (!statusData[status]) {
+        statusData[status] = { total: 0, count: 0 };
+      }
+      statusData[status].total += order.total;
+      statusData[status].count += 1;
+    }
+
+    const averages = {};
+    for (const status in statusData) {
+      const data = statusData[status];
+      averages[status] = Math.round((data.total / data.count) * 100) / 100;
+    }
+    
+    return averages;
+  }
+
+  // Get orders by date range with statistics
+  getOrdersByDateRangeWithStats(startDate, endDate) {
+    const orders = this.getByDateRange(startDate, endDate);
+    
+    const totalRevenue = orders.reduce((sum, o) => sum + o.total, 0);
+    const averageOrderValue = orders.length > 0 
+      ? Math.round((totalRevenue / orders.length) * 100) / 100 
+      : 0;
+    
+    const statusCounts = {};
+    for (const order of orders) {
+      statusCounts[order.status] = (statusCounts[order.status] || 0) + 1;
+    }
+
+    return {
+      orders,
+      statistics: {
+        totalOrders: orders.length,
+        totalRevenue: Math.round(totalRevenue * 100) / 100,
+        averageOrderValue,
+        statusCounts,
+      },
+    };
+  }
 }
 
 module.exports = new OrdersService();
