@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Mini App - Items, Products & Orders</title>
+    <title>Mini App - Products & Orders</title>
     <style>
       :root {
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -188,30 +188,15 @@
   </head>
   <body>
     <div class="card">
-      <h1>Mini App - Items, Products & Orders</h1>
+      <h1>Mini App - Products & Orders</h1>
 
       <div class="tabs">
-        <button class="tab active" data-tab="items">Items</button>
-        <button class="tab" data-tab="products">Products</button>
+        <button class="tab active" data-tab="products">Products</button>
         <button class="tab" data-tab="orders">Orders</button>
       </div>
 
-      <!-- Items Tab -->
-      <div id="items-tab" class="tab-content active">
-        <form id="item-form">
-          <input
-            id="item-name"
-            type="text"
-            placeholder="New item name"
-            required
-          />
-          <button type="submit">Add Item</button>
-        </form>
-        <ul id="items-list"></ul>
-      </div>
-
       <!-- Products Tab -->
-      <div id="products-tab" class="tab-content">
+      <div id="products-tab" class="tab-content active">
         <form id="product-form">
           <input
             id="product-name"
@@ -297,74 +282,12 @@
           document.getElementById(`${targetTab}-tab`).classList.add("active");
 
           // Refresh data when switching tabs
-          if (targetTab === "items") {
-            fetchItems();
-          } else if (targetTab === "products") {
+          if (targetTab === "products") {
             fetchProducts();
           } else if (targetTab === "orders") {
             fetchOrders();
           }
         });
-      });
-
-      // Items API
-      const ITEMS_API = "/api/items";
-      const itemsList = document.getElementById("items-list");
-      const itemForm = document.getElementById("item-form");
-      const itemInput = document.getElementById("item-name");
-
-      async function fetchItems() {
-        try {
-          const res = await fetch(ITEMS_API);
-          const items = await res.json();
-          renderItems(items);
-        } catch (error) {
-          console.error("Error fetching items:", error);
-        }
-      }
-
-      function renderItems(items) {
-        itemsList.innerHTML = "";
-        if (!items.length) {
-          const li = document.createElement("li");
-          li.className = "empty";
-          li.textContent = "No items yet. Add one!";
-          itemsList.appendChild(li);
-          return;
-        }
-
-        for (const item of items) {
-          const li = document.createElement("li");
-          li.textContent = item.name;
-
-          const btn = document.createElement("button");
-          btn.textContent = "Delete";
-          btn.className = "delete-btn";
-          btn.onclick = async () => {
-            await fetch(`${ITEMS_API}/${item.id}`, { method: "DELETE" });
-            fetchItems();
-          };
-
-          li.appendChild(btn);
-          itemsList.appendChild(li);
-        }
-      }
-
-      itemForm.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const name = itemInput.value.trim();
-        if (!name) return;
-        try {
-          await fetch(ITEMS_API, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name }),
-          });
-          itemInput.value = "";
-          fetchItems();
-        } catch (error) {
-          console.error("Error adding item:", error);
-        }
       });
 
       // Products API
@@ -578,7 +501,7 @@
       });
 
       // Initial load
-      fetchItems();
+      fetchProducts();
     </script>
   </body>
 </html>
