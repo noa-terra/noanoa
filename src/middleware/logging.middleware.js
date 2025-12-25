@@ -2038,7 +2038,12 @@ function loggingMiddleware(req, res, next) {
     res.json = function (body) {
       // Transform response body if needed
       if (body && typeof body === "object") {
-        // Add metadata to response
+        // Handle arrays separately - don't wrap them, just return as-is
+        if (Array.isArray(body)) {
+          return originalJson.call(this, body);
+        }
+        
+        // Add metadata to response for objects
         const transformedBody = {
           ...body,
           meta: {
@@ -2381,31 +2386,36 @@ function loggingMiddleware(req, res, next) {
       });
     }
 
-    // Block suspicious User-Agent patterns
-    const suspiciousUserAgents = [
-      /^$/, // Empty user agent
-      /curl/i, // Direct curl requests (unless explicitly allowed)
-      /wget/i, // wget requests
-      /python-requests/i, // Python requests without proper identification
-      /^Mozilla\/4\.0$/, // Generic old browser
-    ];
+    // Block suspicious User-Agent patterns (only in production)
+    // In development, allow common tools like curl and wget
+    const isDevelopment = process.env.NODE_ENV !== "production";
+    
+    if (!isDevelopment) {
+      const suspiciousUserAgents = [
+        /^$/, // Empty user agent
+        /curl/i, // Direct curl requests (unless explicitly allowed)
+        /wget/i, // wget requests
+        /python-requests/i, // Python requests without proper identification
+        /^Mozilla\/4\.0$/, // Generic old browser
+      ];
 
-    // Allow curl/wget for specific paths (like health checks)
-    const isAllowedPath =
-      req.path === "/api/health" || req.path === "/api/status";
+      // Allow curl/wget for specific paths (like health checks)
+      const isAllowedPath =
+        req.path === "/api/health" || req.path === "/api/status";
 
-    if (!isAllowedPath) {
-      const isSuspicious = suspiciousUserAgents.some((pattern) =>
-        pattern.test(userAgent)
-      );
-      if (isSuspicious) {
-        console.warn(
-          `[${requestId}] ⚠️  Suspicious User-Agent detected: ${userAgent} for ${req.method} ${req.path}`
+      if (!isAllowedPath) {
+        const isSuspicious = suspiciousUserAgents.some((pattern) =>
+          pattern.test(userAgent)
         );
-        return res.status(403).json({
-          error: "Forbidden",
-          message: "Invalid User-Agent",
-        });
+        if (isSuspicious) {
+          console.warn(
+            `[${requestId}] ⚠️  Suspicious User-Agent detected: ${userAgent} for ${req.method} ${req.path}`
+          );
+          return res.status(403).json({
+            error: "Forbidden",
+            message: "Invalid User-Agent",
+          });
+        }
       }
     }
 
@@ -2588,3 +2598,5 @@ function loggingMiddleware(req, res, next) {
 
   next();
 }
+
+module.exports = loggingMiddleware;
